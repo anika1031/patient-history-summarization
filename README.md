@@ -139,7 +139,7 @@ This system enables clinicians to ask **natural language queries** over patient 
 - ChromaDB / FAISS
 
 ### Agent Framework
-- LangChain
+- LangGraph
 
 ### Frontend
 - Streamlit (Prototype)
