@@ -6,14 +6,14 @@
 
 ---
 
-## 📌 Problem Statement
+##  Problem Statement
 
 Healthcare providers often lack time to review extensive patient medical records. A single discharge summary can span **6–8 pages**, and patients may have **decades of medical history**.  
 This system enables clinicians to ask **natural language queries** over patient records and retrieve **accurate, concise summaries** quickly.
 
 ---
 
-## 🏗️ System Overview
+##  System Overview
 
 ### High-Level Architecture
 
@@ -46,7 +46,7 @@ This system enables clinicians to ask **natural language queries** over patient 
 
 ---
 
-## 🗄️ Data Architecture
+##  Data Architecture
 
 ### RDBMS (FHIR-Compliant Schema)
 
@@ -88,7 +88,7 @@ This system enables clinicians to ask **natural language queries** over patient 
 
 ---
 
-## ✨ Key Features
+##  Key Features
 
 ### Supported Query Types
 
@@ -113,7 +113,7 @@ This system enables clinicians to ask **natural language queries** over patient 
 
 ---
 
-## 🚀 Implementation Plan
+##  Implementation Plan
 
 | Phase | Duration | Description |
 |------|----------|-------------|
@@ -125,7 +125,7 @@ This system enables clinicians to ask **natural language queries** over patient 
 
 ---
 
-## 🧰 Technology Stack
+##  Technology Stack
 
 ### Backend
 - Python
@@ -149,7 +149,7 @@ This system enables clinicians to ask **natural language queries** over patient 
 
 ---
 
-## 🔐 Security & Compliance
+##  Security & Compliance
 
 - HIPAA compliant
 - Encryption at rest and in transit
@@ -160,7 +160,7 @@ This system enables clinicians to ask **natural language queries** over patient 
 
 ---
 
-## 📊 Success Metrics
+##  Success Metrics
 
 - Query response time: **< 5 seconds**
 - Concrete data accuracy: **100%**
