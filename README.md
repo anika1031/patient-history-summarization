@@ -67,17 +67,36 @@ Formats results into natural language with citations, confidence scores, and sou
 
 ### 2.3 Two-Step Query Processing Strategy
 
-> **CRITICAL:** Vector similarity search alone fails for exact ID matching (e.g., MRN 12345 vs MRN 1234 would appear similar in vector space).
-
 #### The Solution: Two-Step Process
 
-**Step 1: RDBMS Lookup**
+**Why Two-Step Processing is Mandatory**
 
-Use LLM to generate SQL query based on user question and database schema. Retrieve concrete identifiers (patient_id, encounter_id, document_id) from relational database.
+Vector similarity search alone cannot guarantee exact ID matching. For example, MRN 12345 and 1234 may appear semantically similar, leading to incorrect patient data retrieval. Hence, exact identifiers must always be resolved using RDBMS before any semantic search.This ensures strict patient data isolation and prevents cross-patient information leakage.
 
-**Step 2: Document Retrieval**
+**Final Two-Step Strategy**
+**Step 1: Structured Lookup via RDBMS**
+- User query is analyzed by the Query Classifier.
+- Query Processor extracts entities such as MRN, encounter date, condition, and time range.
+- RDBMS Agent generates SQL to:
+  - Resolve patient_id from MRN
+  - Resolve relevant encounter_id based on date/type
+  - Resolve document_id linked to encounters
 
-Use the retrieved IDs to either: (a) directly load specific documents from S3, or (b) query vector database with strict document_id filtering.
+**Step 2: Content Retrieval (Vector DB or S3)**
+- If document size is small or full context is required → load PDF directly from S3.
+- If document is large or query is semantic → query Vector DB with strict metadata filters (patient_id, encounter_id, document_id).
+- Retrieved content is passed to LLM for extraction/summarization.
+---
+### 2.4 Hybrid Retrieval Decision Logic 
+The system decides retrieval strategy based on query type:
+- Exact data queries → RDBMS only (no document access)
+- Semantic content queries → RDBMS + Vector DB
+- Full document understanding → RDBMS + S3
+- Complex medical queries → RDBMS + Vector DB + S3 (Hybrid)
+Filtering Rules (Mandatory):
+- Vector DB queries must include document_id filter.
+- Encounter-level queries must include encounter_id.
+- Patient-level queries must always resolve patient_id first.
 
 #### Example Flow: "What is the follow-up procedure for patient MRN 12345?"
 
@@ -628,13 +647,63 @@ Response:
 
 ## 10. Sample Queries with Expected Processing
 
-| Query | Type | Processing Strategy |
-|---|---|---|
-| "What is the follow-up procedure for patient MRN 12345?" | Hybrid | RDBMS → Get recent encounters → Vector DB/S3 → Semantic search |
-| "Does Mr. Joglekar have drug interactions?" | Semantic | RDBMS → Get patient_id → Vector DB → Search medications section |
-| "Summarize encounters in last 6 months related to diabetes" | Conditional Summary | Temporal normalization → RDBMS → Vector DB filter → Generate summary |
-| "What was the discharge medication for ICU admission on Oct 15?" | Hybrid | RDBMS → Get encounter on Oct 15 → Load document → Extract medications |
-| "What is the contact number for MRN 12345?" | RDBMS Only | Simple SQL query → Return result (no document retrieval) |
-| "Summarize last year's encounters" | Time-based Summary | "Last year" → 2024 dates → Check pre-computed summaries → Return |
+**Query 1: "What is the follow-up procedure for patient MRN 12345?"**
+
+**Type:** Hybrid
+
+**Flow:**
+1. Classify query as follow-up + patient-specific.
+2. Extract MRN = 12345.
+3. SQL → Patient table → get patient_id.
+4. SQL → Encounter table → get most recent closed encounter.
+5. SQL → Document table → get document_id.
+6. If document < 10 pages → load from S3.
+7. Else → Vector DB search filtered by document_id.
+8. LLM extracts follow-up procedure.
+9. Response returned with document citation.
+
+**Query 2: "Does this patient have drug interactions?"**
+
+**Type:** Semantic
+
+**Flow:**
+1. Extract MRN → get patient_id.
+2. SQL → get recent encounter_ids.
+3. SQL → get related document_ids.
+4. Vector DB search with filters (document_id, section_type = medications).
+5. LLM checks interaction patterns.
+6. Answer returned with confidence score.
+
+**Query 3: "Summarize encounters in the last 6 months"**
+
+**Type:** Time-based Summary
+
+**Flow:**
+1. Normalize time range.
+2. SQL → get encounters within date range.
+3. SQL → Encounter table → get encounter_ids for patient_id within date range.
+4. Check encounter_summary table.
+5. If summaries exist → return directly.
+6. Else → retrieve documents and generate on-the-fly summary.
+
+**Query 4: "What was the discharge medication for ICU admission on Oct 15?"**
+
+**Type:** Hybrid
+
+**Flow:**
+1. Extract MRN + date.
+2. SQL → get encounter_id on Oct 15.
+3. SQL → get discharge document_id.
+4. Load document from S3.
+5. LLM extracts medication section.
+
+**Query 5: "What is the contact number for MRN 12345?"**
+
+**Type:** RDBMS Only
+
+**Flow:**
+1. Extract MRN.
+2. SQL → Patient table.
+3. Return result directly.
 
 ---
