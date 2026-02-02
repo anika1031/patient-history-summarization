@@ -158,6 +158,7 @@ CREATE TABLE patient (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
+
 ```
 
 #### Encounter Table DDL
@@ -165,7 +166,6 @@ CREATE TABLE patient (
 CREATE TABLE encounter (
     encounter_id VARCHAR(36) PRIMARY KEY,
     patient_id VARCHAR(36) NOT NULL,
-    practitioner_id VARCHAR(36),
     encounter_type VARCHAR(50),
     start_date DATETIME NOT NULL,
     end_date DATETIME,
@@ -174,43 +174,46 @@ CREATE TABLE encounter (
     FOREIGN KEY (patient_id) REFERENCES patient(patient_id) ON DELETE CASCADE,
     INDEX idx_patient_date (patient_id, start_date)
 );
+
 ```
 
 #### Document Table DDL
 ```sql
 CREATE TABLE document (
-    document_id VARCHAR(36) PRIMARY KEY,
-    encounter_id VARCHAR(36) NOT NULL,
-    patient_id VARCHAR(36) NOT NULL,
-    document_type VARCHAR(50),
-    document_date DATETIME NOT NULL,
-    file_path VARCHAR(255) NOT NULL,
-    vector_index_id VARCHAR(100),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (encounter_id) REFERENCES encounter(encounter_id) ON DELETE CASCADE,
-    FOREIGN KEY (patient_id) REFERENCES patient(patient_id) ON DELETE CASCADE,
-    INDEX idx_patient_doc (patient_id, document_date),
-    INDEX idx_encounter_doc (encounter_id)
+  document_id VARCHAR(36) PRIMARY KEY,
+  encounter_id VARCHAR(36) NOT NULL,
+  document_type VARCHAR(50) NOT NULL,
+  document_date DATE NOT NULL,
+  file_path VARCHAR(255) NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+  FOREIGN KEY (encounter_id)
+    REFERENCES encounter(encounter_id)
+    ON DELETE CASCADE,
+
+  INDEX idx_encounter_doc (encounter_id),
+  INDEX idx_doc_date (document_date)
 );
+
 ```
 
 #### Encounter Summary Table DDL (New - For Pre-Computed Summaries)
 ```sql
-CREATE TABLE encounter_summary (
-    summary_id VARCHAR(36) PRIMARY KEY,
-    encounter_id VARCHAR(36),
-    patient_id VARCHAR(36) NOT NULL,
-    summary_text TEXT NOT NULL,
-    summary_type VARCHAR(50) NOT NULL,
-    -- Types: 'encounter', 'quarterly', 'annual'
-    period_start DATE NOT NULL,
-    period_end DATE NOT NULL,
-    created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (encounter_id) REFERENCES encounter(encounter_id) ON DELETE CASCADE,
-    FOREIGN KEY (patient_id) REFERENCES patient(patient_id) ON DELETE CASCADE,
-    INDEX idx_patient_summary (patient_id, period_start, period_end),
-    INDEX idx_summary_type (summary_type)
+  CREATE TABLE encounter_summary (
+  summary_id VARCHAR(36) PRIMARY KEY,
+  encounter_id VARCHAR(36) NOT NULL,
+  patient_id VARCHAR(36) NOT NULL,
+  summary_text TEXT NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (encounter_id)
+  REFERENCES encounter(encounter_id)
+  ON DELETE CASCADE,
+  FOREIGN KEY (patient_id)
+  REFERENCES patient(patient_id)
+  ON DELETE CASCADE,
+  INDEX idx_patient_summary (patient_id)
 );
+
 ```
 ### 3.1.2 Enum & Allowed Value Definitions
 
@@ -475,6 +478,8 @@ We will implement all three strategies and measure:
 4. Generate conditional summary focusing on matching content
 
 ### 5.2 Summarization Strategy
+Each entry in the encounter_summary table represents a pre-generated summary for a patient over a specific time period defined by period_start_date and period_end_date.
+The summary_text is derived from all documents associated with encounters that fall within the specified time period.
 
 #### Pre-Computed Summaries (Recommended Approach)
 
@@ -485,25 +490,27 @@ We will implement all three strategies and measure:
 - Significant cost savings (avoid regenerating same summaries)
 
 **Implementation:**
-- **Encounter-Level Summaries:** Generated when encounter status changes to "closed"
-- **Quarterly Summaries:** Aggregated from encounter summaries at end of each quarter
-- **Annual Summaries:** Aggregated from quarterly summaries at year-end
+- **Encounter-Level Summaries:** Generated when encounter status changes to "closed". encounter_id is populated.
+- **Quarterly Summaries:** Aggregated from encounter summaries at end of each quarter. encounter_id is NULL.
+- **Annual Summaries:** Aggregated from quarterly summaries at year-end. encounter_id is NULL.
 
 **Example for Patient with 5 Years of History:**
 ```
-Pre-computed summaries available:
-- 60 encounter-level summaries (average 1 per month)
-- 20 quarterly summaries (5 years × 4 quarters)
-- 5 annual summaries
+Example — Encounter Summary
+- encounter_id: E123
+- period: 2026-01-10 to 2026-01-10
+- summary_type: encounter
 
-Query: "Summarize last 2 years"
-→ Retrieve 2 annual summaries (fast, cheap)
+Example — Quarterly Summary
+- encounter_id: NULL
+- period: 2025-10-01 to 2025-12-31
+- summary_type: quarterly
 
-Query: "Summarize Q2 2024 to Q1 2025"
-→ Retrieve 4 quarterly summaries + combine
+Example — Annual Summary
+- encounter_id: NULL
+- period: 2025-01-01 to 2025-12-31
+- summary_type: annual
 
-Query: "Summarize Jan-Feb 2025"
-→ Generate on-the-fly from recent encounters
 ```
 
 #### On-the-Fly Summary Generation
@@ -720,7 +727,7 @@ Response:
 
 **Flow:**
 1. Extract MRN → get patient_id.
-2. SQL → get recent encounter_ids.
+2. SQL → get most recent encounter_ids (ordered by date, limited window)
 3. SQL → get related document_ids.
 4. Vector DB search with filters (document_id, section_type = medications).
 5. LLM checks interaction patterns.
