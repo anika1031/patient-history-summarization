@@ -126,6 +126,17 @@ WHERE d.encounter_id IN (
   ORDER BY start_date DESC LIMIT 2
 );
 ```
+### 2.5 Application Module Structure
+
+To ensure modularity and maintainability:
+
+- **QueryClassifier** – Determines query type (RDBMS / Semantic / Summary / Hybrid)
+- **QueryProcessor** – Extracts entities and normalizes temporal expressions
+- **RDBMSService** – Handles SQL generation and execution
+- **VectorSearchService** – Performs metadata-filtered semantic search
+- **SummarizationService** – Handles pre-computed and on-the-fly summaries
+- **StorageService (AWS)** – Manages S3 document access
+- **ResponseBuilder** – Formats final output with citations and confidence scores
 
 ---
 
@@ -201,7 +212,33 @@ CREATE TABLE encounter_summary (
     INDEX idx_summary_type (summary_type)
 );
 ```
+### 3.1.2 Enum & Allowed Value Definitions
 
+To ensure schema consistency and prevent invalid data entry, the following enum-like fields have strictly defined allowed values. These values are enforced at the application layer and validated during ingestion.
+
+#### encounter_type
+- outpatient
+- inpatient
+- emergency
+- icu
+- teleconsultation
+
+#### document_type
+- discharge_summary
+- lab_report
+- prescription
+- radiology_report
+- progress_note
+
+#### encounter.status
+- active
+- closed
+- cancelled
+
+#### encounter_summary.summary_type
+- encounter
+- quarterly
+- annual
 ### 3.2 Vector Database
 
 **Technology:** ChromaDB (primary) / FAISS (alternative - to be tested)
@@ -245,6 +282,12 @@ s3://bucket-name/
 
 Example: s3://healthcare-docs/12345/enc_2024_10_15.pdf
 ```
+#### file_path Field 
+
+The `file_path` column in the document table stores the **full S3 object path**, not just the filename.
+
+**Example:**
+s3://healthcare-docs/12345/enc_2024_10_15.pdf
 
 #### Rationale:
 
@@ -478,6 +521,10 @@ For patients with extensive histories (>5 years):
 3. Maintain running summary with incremental updates
 4. Final summary captures entire timeline without overwhelming LLM context
 
+### TIME-BASED Logic:
+
+For time-based queries such as ‘last 6 months’, the system always checks for the largest applicable pre-computed summaries first and generates on-the-fly summaries only for uncovered recent periods.
+
 ---
   
 ## 6. Implementation Plan
@@ -537,6 +584,11 @@ For patients with extensive histories (>5 years):
 | Frontend | Streamlit | 
 | Infrastructure | AWS EC2 | Single EC2 instance for database + application |
 | Development Tools | GitHub, VS Code, Docker | Version control and containerization |
+
+AWS Bedrock Agent for:
+- Session-based conversation memory
+- Context retention across multi-turn clinical queries
+- Reducing prompt reconstruction overhead
 
 ---
 ## 8. API Schema (FastAPI)
