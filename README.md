@@ -106,17 +106,24 @@ Filtering Rules (Mandatory):
 4. Either load PDFs from S3 OR query vector DB with document_id filter
 5. Extract relevant information and generate response
 ```sql
--- Step 1: Get patient_id
-SELECT patient_id FROM patient WHERE mrn = '12345';
 
--- Step 2: Get recent encounters
-SELECT encounter_id, start_date FROM encounter
-WHERE patient_id = ''
-ORDER BY start_date DESC LIMIT 2;
+-- Step 1: Resolve patient_id (1 patient = 1 patient_id)
+SELECT patient_id 
+FROM patient 
+WHERE mrn = '12345';
 
--- Step 3: Get document IDs (Option A: Simple join)
-SELECT document_id, file_path FROM document
-WHERE encounter_id IN ();
+-- Step 2: Resolve the most recent relevant encounter for this patient
+SELECT encounter_id 
+FROM encounter
+WHERE patient_id = 'pat_123'
+  AND status = 'closed'
+ORDER BY start_date DESC
+LIMIT 1;
+
+-- Step 3: Retrieve documents linked to this specific encounter
+SELECT document_id, file_path 
+FROM document
+WHERE encounter_id = 'enc_456';
 
 -- Option B: Complex join in one query
 SELECT d.document_id, d.file_path FROM document d
@@ -149,8 +156,7 @@ To ensure modularity and maintainability:
 #### Patient Table DDL
 ```sql
 CREATE TABLE patient (
-    patient_id VARCHAR(36) PRIMARY KEY,
-    mrn VARCHAR(20) UNIQUE NOT NULL,
+    mrn VARCHAR(20) PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
     gender VARCHAR(10),
     birth_date DATE,
@@ -166,13 +172,30 @@ CREATE TABLE patient (
 CREATE TABLE encounter (
     encounter_id VARCHAR(36) PRIMARY KEY,
     patient_id VARCHAR(36) NOT NULL,
+    Practioner_id Varchar Not Null
     encounter_type VARCHAR(50),
     start_date DATETIME NOT NULL,
     end_date DATETIME,
     status VARCHAR(20) DEFAULT 'active',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (patient_id) REFERENCES patient(patient_id) ON DELETE CASCADE,
+    
+    FOREIGN KEY (practitioner_id)
+    REFERENCES practitioner(practitioner_id) ON DELETE RESTRICT;
     INDEX idx_patient_date (patient_id, start_date)
+    INDEX idx_practitioner (practitioner_id)
+);
+```
+#### Practitioner Table DDL
+```sql
+  PRACTITIONER TABLE DDL
+  CREATE TABLE practitioner (
+  practitioner _id INT PRIMARY KEY AUTO_INCREMENT,
+  first_name VARCHAR(50) NOT NULL,
+  last_name VARCHAR(50) NOT NULL,
+  department VARCHAR(100),
+  status VARCHAR(20) DEFAULT 'Active',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 ```
@@ -630,21 +653,11 @@ Response (Streaming Supported):
 }
 ```
 
-### 8.2 Patient Lookup Endpoint
-```http
-GET /api/patient/{mrn}
+-- Step 3: Retrieve documents linked to this specific encounter
+SELECT document_id, file_path 
+FROM document
+WHERE encounter_id = 'enc_456';
 
-Response:
-{
-  "patient_id": "string",
-  "mrn": "string",
-  "name": "string",
-  "gender": "string",
-  "birth_date": "YYYY-MM-DD",
-  "encounter_count": "int",
-  "last_encounter_date": "YYYY-MM-DD"
-}
-```
 
 ### 8.3 Summarization Endpoint
 ```http
