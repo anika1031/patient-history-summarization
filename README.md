@@ -779,3 +779,17 @@ Response:
 3. Return result directly.
 
 ---
+## UI Design – Patient History Summarization System
+
+We have created a **Figma prototype** for the clinician-facing web interface that aligns with our design document and backend architecture.
+
+👉 **View the interactive UI design here:**  
+🔗 https://www.figma.com/make/Gb3nDKB32xbzSHglLDyaXq/Patient-History-Summarization-UI?t=auKjKBL9HOusSeM4-1
+
+This prototype includes:
+- Patient query dashboard
+- Time-based summary interface
+- Medication interaction view
+- Answer / citations panel
+
+Use this link to explore layout, component hierarchy, and user flow.
