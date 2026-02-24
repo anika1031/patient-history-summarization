@@ -1,1 +1,20 @@
-
+PATEINT TABLE
+CREATE TABLE patient (
+    mrn VARCHAR(20) PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    gender VARCHAR(10),
+    birth_date DATE,
+    contact VARCHAR(50),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+INSERT INTO patient (mrn, name, gender, birth_date, contact)
+VALUES
+('MRN001', 'Rahul Sharma', 'Male', '1998-05-14', '9876543210'),
+('MRN002', 'Ananya Verma', 'Female', '2001-11-22', '9123456780'),
+('MRN003', 'Karan Mehta', 'Male', '1995-02-10', '9988776655'),
+('MRN004', 'Sneha Patil', 'Female', '1999-07-30', '9012345678'),
+('MRN005', 'Amit Joshi', 'Male', '1988-12-05', '8899001122'),
+('MRN006', 'Priya Kulkarni', 'Female', '1997-03-18', '9765432109'),
+('MRN007', 'Rohan Desai', 'Male', '2000-09-25', '9345678123'),
+('MRN008', 'Neha Singh', 'Female', '1996-01-08', '9456123789');
