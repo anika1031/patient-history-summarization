@@ -16,12 +16,10 @@ VALUES
 ('MRN004', 'Sneha Patil', 'Female', '1999-07-30', '9012345678'),
 ('MRN005', 'Amit Joshi', 'Male', '1988-12-05', '8899001122'),
 ('MRN006', 'Priya Kulkarni', 'Female', '1997-03-18', '9765432109'),
-('MRN007', 'Rohan Desai', 'Male', '2000-09-25', '9345678123'),
-('MRN008', 'Neha Singh', 'Female', '1996-01-08', '9456123789');
 
 
-**This is bold text Documnet table:**
 
+ Documnet table:
 -- Table: public.document
 
 -- DROP TABLE IF EXISTS public.document;
@@ -60,34 +58,16 @@ CREATE INDEX IF NOT EXISTS idx_encounter_doc
     WITH (fillfactor=100, deduplicate_items=True)
     TABLESPACE pg_default;
 
-Encounter Table:
-
-CREATE TABLE encounter (
-    encounter_id VARCHAR(36) PRIMARY KEY,
-    mrn VARCHAR(20) NOT NULL,           -- match patient.mrn type
-    practitioner_id VARCHAR(36) NOT NULL,
-    encounter_type VARCHAR(50),
-    start_date TIMESTAMP NOT NULL,
-    end_date TIMESTAMP,
-    status VARCHAR(20) DEFAULT 'active',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (mrn) REFERENCES patient_table(mrn) ON DELETE CASCADE
-    -- FOREIGN KEY for practitioner can be added after practitioner table is created
-);
-
--- Create indexes separately in PostgreSQL
-CREATE INDEX idx_patient_date ON encounter (mrn, start_date);
--- CREATE INDEX idx_practitioner ON encounter (practitioner_id);  -- after practitioner table exists
-
--- Sample data for encounter table
-INSERT INTO encounter (encounter_id, mrn, practitioner_id, encounter_type, start_date, end_date, status)
+INSERT INTO public.document
+(document_id, encounter_id, document_type, document_date, file_path)
 VALUES
-('enc001', 'mrn001', 'PR001', 'Consultation', '2026-01-10 10:00:00', '2026-01-10 10:30:00', 'active'),
-('enc002', 'mrn002', 'PR002', 'Follow-up', '2026-01-11 11:00:00', '2026-01-11 11:20:00', 'active'),
-('enc003', 'mrn003', 'PR001', 'Checkup', '2026-01-12 09:30:00', '2026-01-12 10:00:00', 'active'),
-('enc004', 'mrn001', 'PR003', 'Emergency', '2026-01-13 14:15:00', '2026-01-13 15:00:00', 'completed'),
-('enc005', 'mrn004', 'PR002', 'Consultation', '2026-01-14 13:00:00', '2026-01-14 13:30:00', 'active'),
-('enc006', 'mrn002', 'PR003', 'Procedure', '2026-01-15 15:00:00', '2026-01-15 16:00:00', 'active');
+('DOC001','ENC1','Lab Report','2026-02-20','https://mybucket.s3.amazonaws.com/documents/lab1.pdf'),
+('DOC002','ENC1','Prescription','2026-02-20','https://mybucket.s3.amazonaws.com/documents/prescription1.pdf'),
+('DOC003','ENC2','X-Ray','2026-02-18','https://mybucket.s3.amazonaws.com/documents/xray1.jpg'),
+('DOC004','ENC3','MRI Scan','2026-02-17','https://mybucket.s3.amazonaws.com/documents/mri1.pdf'),
+('DOC005','ENC2','Discharge Summary','2026-02-15','https://mybucket.s3.amazonaws.com/documents/discharge1.pdf'),
+('DOC006','ENC4','Billing Invoice','2026-02-14','https://mybucket.s3.amazonaws.com/documents/invoice1.pdf');
+
 
 
 Practioner table:
@@ -121,12 +101,41 @@ VALUES
 ('Sneha', 'Patil', 'Pediatrics', 'Active'),
 ('Arjun', 'Mehta', 'Dermatology', 'Active'),
 ('Priya', 'Joshi', 'General Medicine', 'Active'),
-('Rohan', 'Verma', 'Radiology', 'Inactive'),
-('Neha', 'Singh', 'Gynecology', 'Active');
+
+
+
+
+Encounter Table:
+CREATE TABLE encounter (
+    encounter_id VARCHAR(36) PRIMARY KEY,
+    mrn VARCHAR(20) NOT NULL,           -- match patient.mrn type
+    practitioner_id VARCHAR(36) NOT NULL,
+    encounter_type VARCHAR(50),
+    start_date TIMESTAMP NOT NULL,
+    end_date TIMESTAMP,
+    status VARCHAR(20) DEFAULT 'active',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (mrn) REFERENCES patient_table(mrn) ON DELETE CASCADE
+    -- FOREIGN KEY for practitioner can be added after practitioner table is created
+);
+
+-- Create indexes separately in PostgreSQL
+CREATE INDEX idx_patient_date ON encounter (mrn, start_date);
+-- CREATE INDEX idx_practitioner ON encounter (practitioner_id);  -- after practitioner table exists
+
+-- Sample data for encounter table
+INSERT INTO encounter (encounter_id, mrn, practitioner_id, encounter_type, start_date, end_date, status)
+VALUES
+('enc001', 'mrn001', 'PR001', 'Consultation', '2026-01-10 10:00:00', '2026-01-10 10:30:00', 'active'),
+('enc002', 'mrn002', 'PR002', 'Follow-up', '2026-01-11 11:00:00', '2026-01-11 11:20:00', 'active'),
+('enc003', 'mrn003', 'PR001', 'Checkup', '2026-01-12 09:30:00', '2026-01-12 10:00:00', 'active'),
+('enc004', 'mrn001', 'PR003', 'Emergency', '2026-01-13 14:15:00', '2026-01-13 15:00:00', 'completed'),
+('enc005', 'mrn004', 'PR002', 'Consultation', '2026-01-14 13:00:00', '2026-01-14 13:30:00', 'active'),
+('enc006', 'mrn002', 'PR003', 'Procedure', '2026-01-15 15:00:00', '2026-01-15 16:00:00', 'active');
+
 
 
 encounter_summary:
-
 -- Table: public.encounter_summary
 
 -- DROP TABLE IF EXISTS public.encounter_summary;
