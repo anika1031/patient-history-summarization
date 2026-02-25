@@ -163,3 +163,14 @@ CREATE INDEX IF NOT EXISTS idx_patient_summary
     (mrn COLLATE pg_catalog."default" ASC NULLS LAST)
     WITH (fillfactor=100, deduplicate_items=True)
     TABLESPACE pg_default;
+
+
+INSERT INTO public.encounter_summary
+(summary_id, encounter_id, mrn, summary_text)
+VALUES
+('SUM001','ENC1','MRN1001','Patient presented with fever and cough. Diagnosed with viral infection. Prescribed medication and advised rest.'),
+('SUM002','ENC2','MRN1002','Patient complained of chest pain. ECG performed. No major abnormalities detected.'),
+('SUM003','ENC3','MRN1003','Routine health check-up. Vital signs normal. Recommended annual follow-up.'),
+('SUM004','ENC4','MRN1004','Patient admitted for migraine. MRI scan conducted. Medication adjusted accordingly.'),
+('SUM005','ENC2','MRN1002','Follow-up visit for chest pain. Symptoms reduced after treatment.'),
+('SUM006','ENC5','MRN1005','Minor fracture in left arm. Cast applied. Advised limited movement for 4 weeks.');
