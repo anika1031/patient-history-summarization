@@ -1,1 +1,736 @@
+import streamlit as st
+import requests
+import json
 
+# ─────────────────────────────────────────
+# CONFIG
+# ─────────────────────────────────────────
+API = "http://localhost:8000"
+
+st.set_page_config(
+    page_title="DMH – Patient History Summarization",
+    page_icon="🏥",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# ─────────────────────────────────────────
+# CUSTOM CSS
+# ─────────────────────────────────────────
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
+
+html, body, [class*="css"] {
+    font-family: 'IBM Plex Sans', sans-serif;
+}
+
+/* ── HIDE STREAMLIT DEFAULTS ── */
+#MainMenu { visibility: hidden; }
+footer { visibility: hidden; }
+header { visibility: hidden; }
+
+/* ── SIDEBAR ── */
+[data-testid="stSidebar"] {
+    background: #FFFFFF;
+    border-right: 1px solid #DDE3EC;
+}
+[data-testid="stSidebar"] > div:first-child {
+    padding-top: 1.5rem;
+}
+
+/* ── MAIN BACKGROUND ── */
+.main .block-container {
+    background: #F4F6F9;
+    padding: 1.5rem 2rem;
+    max-width: 100%;
+}
+
+/* ── CARDS ── */
+.dmh-card {
+    background: #FFFFFF;
+    border: 1px solid #DDE3EC;
+    border-radius: 12px;
+    padding: 1.25rem 1.5rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    margin-bottom: 1rem;
+}
+
+.dmh-card-header {
+    font-size: 13px;
+    font-weight: 600;
+    color: #1A2233;
+    border-bottom: 1px solid #DDE3EC;
+    padding-bottom: 0.75rem;
+    margin-bottom: 1rem;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* ── PATIENT INFO STRIP ── */
+.patient-strip {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 10px;
+    margin-bottom: 1rem;
+}
+.info-cell {
+    background: #F0F3F7;
+    border: 1px solid #DDE3EC;
+    border-radius: 8px;
+    padding: 10px 14px;
+}
+.cell-label {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: #718096;
+    margin-bottom: 3px;
+}
+.cell-value {
+    font-size: 14px;
+    font-weight: 500;
+    color: #1A2233;
+}
+
+/* ── BADGES ── */
+.badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-size: 11.5px;
+    font-weight: 500;
+    margin-right: 6px;
+}
+.badge-info    { background: #E8F0FB; color: #1A56A0; }
+.badge-success { background: #DCFCE7; color: #2D7A4F; }
+.badge-warn    { background: #FEF3C7; color: #B45309; }
+.badge-danger  { background: #FEE2E2; color: #C53030; }
+.badge-neutral { background: #F0F3F7; color: #4A5568; border: 1px solid #DDE3EC; }
+
+/* ── ANSWER PANEL ── */
+.answer-panel {
+    background: #F0F3F7;
+    border: 1px solid #DDE3EC;
+    border-left: 3px solid #1A56A0;
+    border-radius: 0 8px 8px 0;
+    padding: 1rem 1.25rem;
+    font-size: 14px;
+    line-height: 1.75;
+    color: #1A2233;
+    white-space: pre-wrap;
+    font-family: 'IBM Plex Sans', sans-serif;
+}
+
+/* ── SOURCE ITEMS ── */
+.source-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid #DDE3EC;
+    border-radius: 8px;
+    margin-bottom: 6px;
+    background: #FFFFFF;
+    font-size: 12.5px;
+}
+.source-num {
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    background: #E8F0FB;
+    color: #1A56A0;
+    font-size: 11px;
+    font-weight: 600;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    margin-top: 1px;
+}
+.source-preview {
+    color: #4A5568;
+    line-height: 1.5;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11.5px;
+}
+.source-meta {
+    font-size: 11px;
+    color: #718096;
+    margin-top: 3px;
+}
+
+/* ── SUMMARY TEXT ── */
+.summary-text {
+    font-size: 13.5px;
+    line-height: 1.8;
+    color: #1A2233;
+    white-space: pre-wrap;
+    padding: 0.5rem 0;
+}
+
+/* ── MED PANELS ── */
+.med-raw {
+    font-size: 13px;
+    line-height: 1.8;
+    white-space: pre-wrap;
+    color: #1A2233;
+}
+
+/* ── STATUS DOT ── */
+.status-online  { color: #10B981; font-weight: 600; }
+.status-offline { color: #EF4444; font-weight: 600; }
+
+/* ── UPLOAD ZONE ── */
+.upload-hint {
+    background: #F0F3F7;
+    border: 2px dashed #C8D2E0;
+    border-radius: 12px;
+    padding: 1.5rem;
+    text-align: center;
+    color: #718096;
+    font-size: 13px;
+    margin-bottom: 0.5rem;
+}
+
+/* ── SECTION LABEL ── */
+.section-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #718096;
+    margin: 1.25rem 0 0.5rem;
+}
+
+/* ── STACKED METRIC OVERRIDE ── */
+[data-testid="metric-container"] {
+    background: #F0F3F7;
+    border: 1px solid #DDE3EC;
+    border-radius: 8px;
+    padding: 10px 14px;
+}
+
+/* ── BUTTON OVERRIDES ── */
+.stButton > button {
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-weight: 500;
+    border-radius: 8px;
+}
+.stButton > button[kind="primary"] {
+    background: #1A56A0;
+    border: none;
+}
+.stButton > button[kind="primary"]:hover {
+    background: #1446810;
+    filter: brightness(1.08);
+}
+
+/* ── TEXT INPUT ── */
+.stTextInput > div > div > input,
+.stTextArea > div > div > textarea,
+.stSelectbox > div > div {
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-size: 13.5px;
+    border-radius: 8px;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+# ─────────────────────────────────────────
+# SESSION STATE
+# ─────────────────────────────────────────
+if "current_patient" not in st.session_state:
+    st.session_state.current_patient = None
+if "query_result" not in st.session_state:
+    st.session_state.query_result = None
+if "summary_result" not in st.session_state:
+    st.session_state.summary_result = None
+if "med_result" not in st.session_state:
+    st.session_state.med_result = None
+if "upload_result" not in st.session_state:
+    st.session_state.upload_result = None
+
+
+# ─────────────────────────────────────────
+# HELPERS
+# ─────────────────────────────────────────
+def api_status():
+    try:
+        r = requests.get(f"{API}/", timeout=3)
+        return r.ok
+    except Exception:
+        return False
+
+
+def load_patient(mrn: str):
+    try:
+        r = requests.get(f"{API}/api/patient/{mrn}", timeout=10)
+        if r.ok:
+            return r.json(), None
+        return None, r.json().get("detail", "Patient not found.")
+    except Exception as e:
+        return None, f"Cannot connect to API: {e}"
+
+
+def query_api(mrn: str, question: str):
+    try:
+        r = requests.post(
+            f"{API}/api/query",
+            json={"mrn": mrn, "question": question},
+            timeout=60
+        )
+        if r.ok:
+            return r.json(), None
+        return None, r.json().get("detail", "Query failed.")
+    except Exception as e:
+        return None, str(e)
+
+
+def time_summary_api(mrn: str, time_range: str):
+    try:
+        r = requests.post(
+            f"{API}/api/time_summary",
+            json={"mrn": mrn, "time_range": time_range},
+            timeout=120
+        )
+        if r.ok:
+            return r.json(), None
+        return None, r.json().get("detail", "Failed.")
+    except Exception as e:
+        return None, str(e)
+
+
+def medication_api(mrn: str):
+    try:
+        r = requests.post(
+            f"{API}/api/medication_safety",
+            json={"mrn": mrn},
+            timeout=120
+        )
+        if r.ok:
+            return r.json(), None
+        return None, r.json().get("detail", "Failed.")
+    except Exception as e:
+        return None, str(e)
+
+
+def upload_pdf_api(mrn: str, file_bytes, filename: str):
+    try:
+        r = requests.post(
+            f"{API}/api/upload_pdf?mrn={mrn}",
+            files={"file": (filename, file_bytes, "application/pdf")},
+            timeout=120
+        )
+        if r.ok:
+            return r.json(), None
+        return None, r.json().get("detail", "Upload failed.")
+    except Exception as e:
+        return None, str(e)
+
+
+# ─────────────────────────────────────────
+# SIDEBAR
+# ─────────────────────────────────────────
+with st.sidebar:
+    # Logo / Brand
+    st.markdown("""
+    <div style="display:flex;align-items:center;gap:10px;padding:0 0 1rem 0;border-bottom:1px solid #DDE3EC;margin-bottom:1rem;">
+        <div style="width:36px;height:36px;background:#1A56A0;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
+            </svg>
+        </div>
+        <div>
+            <div style="font-size:14px;font-weight:600;color:#1A2233;line-height:1.3;">DMH System</div>
+            <div style="font-size:11px;color:#718096;">Patient History Summarization</div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # API Status
+    online = api_status()
+    if online:
+        st.markdown('<div class="status-online">● API Connected</div>', unsafe_allow_html=True)
+    else:
+        st.markdown('<div class="status-offline">● API Offline</div>', unsafe_allow_html=True)
+    st.caption("localhost:8000")
+
+    st.markdown('<div class="section-label">Clinical Tools</div>', unsafe_allow_html=True)
+
+    tab = st.radio(
+        "Navigate",
+        ["🔍 Patient Query", "📅 Time-Based Summary", "💊 Medication Safety", "📤 Upload Records"],
+        label_visibility="collapsed"
+    )
+
+    # Active patient card
+    if st.session_state.current_patient:
+        p = st.session_state.current_patient
+        initials = "".join(w[0] for w in (p.get("name") or "?").split()[:2]).upper()
+        st.markdown(f"""
+        <div style="margin-top:1.5rem;background:#E8F0FB;border:1px solid #C5D8F4;border-radius:8px;padding:0.875rem;">
+            <div style="width:36px;height:36px;border-radius:50%;background:#1A56A0;color:#fff;
+                        font-size:13px;font-weight:600;display:flex;align-items:center;
+                        justify-content:center;margin-bottom:8px;">{initials}</div>
+            <div style="font-size:13px;font-weight:600;color:#1A56A0;">{p.get('name','–')}</div>
+            <div style="font-size:11px;color:#3563A0;margin-top:2px;">
+                MRN: {p.get('mrn','–')} · {p.get('gender') or ''} · {str(p.get('age') or '')+'y' if p.get('age') else ''}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    st.markdown('<div class="section-label" style="margin-top:auto;">System</div>', unsafe_allow_html=True)
+    st.caption(f"API: {API}")
+
+
+# ─────────────────────────────────────────
+# MAIN HEADER
+# ─────────────────────────────────────────
+st.markdown("""
+<div style="display:flex;align-items:center;gap:10px;margin-bottom:1.5rem;
+            padding-bottom:1rem;border-bottom:1px solid #DDE3EC;">
+    <div style="width:32px;height:32px;background:#1A56A0;border-radius:7px;
+                display:flex;align-items:center;justify-content:center;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
+        </svg>
+    </div>
+    <div>
+        <div style="font-size:16px;font-weight:600;color:#1A2233;">
+            DMH – Patient History Summarization System
+        </div>
+        <div style="font-size:11px;color:#718096;">Deenanath Mangeshkar Hospital &amp; Research Center</div>
+    </div>
+</div>
+""", unsafe_allow_html=True)
+
+
+# ─────────────────────────────────────────
+# TAB 1 — PATIENT QUERY
+# ─────────────────────────────────────────
+if tab == "🔍 Patient Query":
+
+    # Patient identification card
+    st.markdown('<div class="dmh-card">', unsafe_allow_html=True)
+    st.markdown('<div class="dmh-card-header">👤 Patient Identification</div>', unsafe_allow_html=True)
+
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        mrn_input = st.text_input(
+            "Medical Record Number (MRN)",
+            placeholder="e.g. MRN-010 or 010",
+            key="query_mrn"
+        )
+    with col2:
+        st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+        load_btn = st.button("Load Patient", type="primary", use_container_width=True)
+
+    if load_btn and mrn_input.strip():
+        with st.spinner("Loading patient..."):
+            patient, err = load_patient(mrn_input.strip())
+            if patient:
+                st.session_state.current_patient = patient
+            else:
+                st.error(err)
+
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # Patient info strip
+    if st.session_state.current_patient:
+        p = st.session_state.current_patient
+        c1, c2, c3, c4, c5 = st.columns(5)
+        with c1:
+            st.markdown(f'<div class="info-cell"><div class="cell-label">Name</div><div class="cell-value">{p.get("name","–")}</div></div>', unsafe_allow_html=True)
+        with c2:
+            st.markdown(f'<div class="info-cell"><div class="cell-label">MRN</div><div class="cell-value">{p.get("mrn","–")}</div></div>', unsafe_allow_html=True)
+        with c3:
+            st.markdown(f'<div class="info-cell"><div class="cell-label">Age</div><div class="cell-value">{str(p.get("age","–"))+" yrs" if p.get("age") else "–"}</div></div>', unsafe_allow_html=True)
+        with c4:
+            st.markdown(f'<div class="info-cell"><div class="cell-label">Gender</div><div class="cell-value">{p.get("gender","–")}</div></div>', unsafe_allow_html=True)
+        with c5:
+            st.markdown(f'<div class="info-cell"><div class="cell-label">Last Encounter</div><div class="cell-value">{p.get("last_encounter","–")}</div></div>', unsafe_allow_html=True)
+        st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+
+    # Query input card
+    st.markdown('<div class="dmh-card">', unsafe_allow_html=True)
+    st.markdown('<div class="dmh-card-header">🔍 Natural Language Query</div>', unsafe_allow_html=True)
+
+    question = st.text_area(
+        "Clinical Question",
+        placeholder="e.g. What medications was the patient discharged with? What were the chief complaints on admission?",
+        height=90,
+        key="clinical_question"
+    )
+
+    col_ask, col_clear, _ = st.columns([1.5, 1, 5])
+    with col_ask:
+        ask_btn = st.button("Ask Query", type="primary", use_container_width=True)
+    with col_clear:
+        if st.button("Clear", use_container_width=True):
+            st.session_state.query_result = None
+            st.rerun()
+
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    if ask_btn:
+        mrn = (st.session_state.current_patient or {}).get("mrn") or mrn_input.strip()
+        if not mrn:
+            st.warning("Please load a patient first.")
+        elif not question.strip():
+            st.warning("Please enter a question.")
+        else:
+            with st.spinner("Processing query..."):
+                result, err = query_api(mrn, question.strip())
+                if result:
+                    st.session_state.query_result = result
+                else:
+                    st.error(err)
+
+    # Results
+    if st.session_state.query_result:
+        r = st.session_state.query_result
+        qtype = r.get("query_type", "VECTOR")
+        strategy = "RDBMS Only" if qtype == "RDBMS" else "AstraDB Vector Search"
+
+        # Feedback badges
+        st.markdown(f"""
+        <div class="dmh-card">
+            <div class="dmh-card-header">ℹ️ System Feedback</div>
+            <span class="badge badge-info">Query Type: {qtype}</span>
+            <span class="badge badge-neutral">Strategy: {strategy}</span>
+            <span class="badge badge-success">Status: Resolved</span>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # Answer
+        st.markdown('<div class="dmh-card">', unsafe_allow_html=True)
+        st.markdown('<div class="dmh-card-header">💬 Answer</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="answer-panel">{r.get("answer","No answer returned.")}</div>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        # Sources
+        sources = r.get("sources", [])
+        if sources:
+            st.markdown('<div class="dmh-card">', unsafe_allow_html=True)
+            st.markdown('<div class="dmh-card-header">📄 Source Citations</div>', unsafe_allow_html=True)
+            for i, s in enumerate(sources):
+                preview = (s.get("preview") or "")[:200]
+                chunk_idx = s.get("chunk_index", i)
+                st.markdown(f"""
+                <div class="source-item">
+                    <div class="source-num">{i+1}</div>
+                    <div>
+                        <div class="source-preview">{preview}</div>
+                        <div class="source-meta">Chunk #{chunk_idx} · Patient Records · AstraDB</div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
+
+
+# ─────────────────────────────────────────
+# TAB 2 — TIME-BASED SUMMARY
+# ─────────────────────────────────────────
+elif tab == "📅 Time-Based Summary":
+
+    st.markdown('<div class="dmh-card">', unsafe_allow_html=True)
+    st.markdown('<div class="dmh-card-header">📅 Time-Based Summary Configuration</div>', unsafe_allow_html=True)
+
+    col1, col2, col3 = st.columns([2, 2, 1.5])
+    with col1:
+        summary_mrn = st.text_input(
+            "Patient MRN",
+            value=(st.session_state.current_patient or {}).get("mrn", ""),
+            placeholder="e.g. 010",
+            key="summary_mrn"
+        )
+    with col2:
+        time_range = st.selectbox(
+            "Time Range",
+            ["Last 1 Month", "Last 3 Months", "Last 6 Months", "Last 1 Year"],
+            index=2
+        )
+    with col3:
+        st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+        gen_btn = st.button("Generate Summary", type="primary", use_container_width=True)
+
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    if gen_btn:
+        if not summary_mrn.strip():
+            st.warning("Please enter a MRN.")
+        else:
+            with st.spinner("Generating chronological summary..."):
+                result, err = time_summary_api(summary_mrn.strip(), time_range)
+                if result:
+                    st.session_state.summary_result = result
+                else:
+                    st.error(err)
+
+    if st.session_state.summary_result:
+        r = st.session_state.summary_result
+        st.markdown('<div class="dmh-card">', unsafe_allow_html=True)
+        st.markdown(f"""
+        <div class="dmh-card-header">
+            📋 Chronological Summary
+            <span class="badge badge-info" style="margin-left:auto;">{r.get("time_range","")}</span>
+            <span class="badge badge-neutral">On-the-fly generated</span>
+        </div>
+        """, unsafe_allow_html=True)
+        st.markdown(f'<div class="summary-text">{r.get("summary","–")}</div>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+
+# ─────────────────────────────────────────
+# TAB 3 — MEDICATION SAFETY
+# ─────────────────────────────────────────
+elif tab == "💊 Medication Safety":
+
+    st.markdown('<div class="dmh-card">', unsafe_allow_html=True)
+    st.markdown('<div class="dmh-card-header">💊 Medication Safety Check</div>', unsafe_allow_html=True)
+    st.markdown('<span class="badge badge-neutral">Scope: Most Recent Encounters</span>', unsafe_allow_html=True)
+    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        med_mrn = st.text_input(
+            "Patient MRN",
+            value=(st.session_state.current_patient or {}).get("mrn", ""),
+            placeholder="e.g. 010",
+            key="med_mrn"
+        )
+    with col2:
+        st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+        med_btn = st.button("Run Safety Check", type="primary", use_container_width=True)
+
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    if med_btn:
+        if not med_mrn.strip():
+            st.warning("Please enter a MRN.")
+        else:
+            with st.spinner("Analysing medications..."):
+                result, err = medication_api(med_mrn.strip())
+                if result:
+                    st.session_state.med_result = result
+                else:
+                    st.error(err)
+
+    if st.session_state.med_result:
+        r = st.session_state.med_result
+        chunks_used = r.get("context_chunks_used", 0)
+        interactions_raw = r.get("interactions_raw", "")
+        has_interaction = "no significant" not in interactions_raw.lower()
+
+        col_med, col_int = st.columns(2)
+
+        with col_med:
+            st.markdown('<div class="dmh-card">', unsafe_allow_html=True)
+            st.markdown(f"""
+            <div class="dmh-card-header">
+                💊 Medications Detected
+                <span class="badge badge-info" style="margin-left:auto;">{chunks_used} chunks</span>
+            </div>
+            """, unsafe_allow_html=True)
+            st.markdown(f'<div class="med-raw">{r.get("medications_raw","–")}</div>', unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
+
+        with col_int:
+            st.markdown('<div class="dmh-card">', unsafe_allow_html=True)
+            interaction_badge_cls = "badge-warn" if has_interaction else "badge-success"
+            interaction_badge_txt = "Review Required" if has_interaction else "No Interactions"
+            st.markdown(f"""
+            <div class="dmh-card-header">
+                ⚠️ Interaction Analysis
+                <span class="badge {interaction_badge_cls}" style="margin-left:auto;">{interaction_badge_txt}</span>
+            </div>
+            """, unsafe_allow_html=True)
+            st.markdown(f'<div class="med-raw">{interactions_raw or "–"}</div>', unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
+
+
+# ─────────────────────────────────────────
+# TAB 4 — UPLOAD RECORDS
+# ─────────────────────────────────────────
+elif tab == "📤 Upload Records":
+
+    st.markdown('<div class="dmh-card">', unsafe_allow_html=True)
+    st.markdown('<div class="dmh-card-header">📤 Upload Discharge Summary / Clinical Record</div>', unsafe_allow_html=True)
+
+    upload_mrn = st.text_input(
+        "Patient MRN (required)",
+        value=(st.session_state.current_patient or {}).get("mrn", ""),
+        placeholder="e.g. 010 or MRN-010",
+        key="upload_mrn"
+    )
+
+    st.markdown('<div class="upload-hint">📄 Select a PDF discharge summary or clinical note below</div>', unsafe_allow_html=True)
+
+    uploaded_file = st.file_uploader(
+        "Choose PDF file",
+        type=["pdf"],
+        label_visibility="collapsed"
+    )
+
+    if uploaded_file:
+        kb = uploaded_file.size / 1024
+        st.markdown(f"""
+        <div style="background:#F0F3F7;border:1px solid #DDE3EC;border-radius:8px;
+                    padding:10px 14px;font-size:13px;margin-bottom:0.75rem;">
+            <span style="font-weight:500;color:#1A2233;">{uploaded_file.name}</span>
+            <span style="color:#718096;margin-left:8px;">{kb:.1f} KB</span>
+        </div>
+        """, unsafe_allow_html=True)
+
+    upload_btn = st.button(
+        "Upload to System",
+        type="primary",
+        disabled=(uploaded_file is None),
+    )
+
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    if upload_btn:
+        if not upload_mrn.strip():
+            st.warning("Please enter a MRN.")
+        elif uploaded_file is None:
+            st.warning("Please select a PDF file.")
+        else:
+            with st.spinner("Uploading & indexing..."):
+                result, err = upload_pdf_api(
+                    upload_mrn.strip(),
+                    uploaded_file.read(),
+                    uploaded_file.name
+                )
+                if result:
+                    st.session_state.upload_result = result
+                else:
+                    st.error(err)
+
+    if st.session_state.upload_result:
+        r = st.session_state.upload_result
+        st.markdown('<div class="dmh-card">', unsafe_allow_html=True)
+        st.markdown("""
+        <div class="dmh-card-header" style="color:#2D7A4F;">
+            ✅ Upload Successful
+        </div>
+        """, unsafe_allow_html=True)
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.markdown(f'<div class="info-cell"><div class="cell-label">Filename</div><div class="cell-value">{r.get("filename","–")}</div></div>', unsafe_allow_html=True)
+        with c2:
+            st.markdown(f'<div class="info-cell"><div class="cell-label">MRN</div><div class="cell-value">{r.get("mrn","–")}</div></div>', unsafe_allow_html=True)
+        with c3:
+            st.markdown(f'<div class="info-cell"><div class="cell-label">Chunks Indexed</div><div class="cell-value">{r.get("total_chunks","–")}</div></div>', unsafe_allow_html=True)
+        st.markdown("""
+        <div style="background:#DCFCE7;border:1px solid #86EFAC;border-radius:8px;
+                    padding:10px 14px;font-size:13px;color:#2D7A4F;margin-top:10px;">
+            Record successfully chunked and stored in AstraDB vector store.
+            You can now query this patient.
+        </div>
+        """, unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
