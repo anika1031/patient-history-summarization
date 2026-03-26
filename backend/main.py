@@ -2,128 +2,20 @@
 # 1️⃣ Imports
 # ==============================
 
-from fastapi import FastAPI, UploadFile, File, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, UploadFile, File
 from pydantic import BaseModel
 from sqlalchemy import text
 from db import SessionLocal
 
 import os
 import shutil
-
+import requests
 
 from pdf_utils import extract_text_from_pdf, chunk_text
 from embedding_utils import generate_embedding
-from astra_db import (
-    collection,
-    clean_mrn,
-    store_chunks,
-    vector_search,
-    time_based_summary,
-    medication_safety_check,
-)
+from astra_db import collection, store_chunks, vector_search
 
-app = FastAPI(title="DMH Patient History Summarization API")
-# Allow frontend to call this API
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# ==============================
-# REQUEST / RESPONSE MODELS
-# ==============================
-
-class QueryRequest(BaseModel):
-    mrn: str
-    question: str
-
-class QueryResponse(BaseModel):
-    answer: str
-    query_type: str
-    sources: list = []
-
-class TimeSummaryRequest(BaseModel):
-    mrn: str
-    time_range: str = "Last 6 Months"   # "Last 1 Month" | "Last 3 Months" | "Last 6 Months" | "Last 1 Year"
-
-class TimeSummaryResponse(BaseModel):
-    summary: str
-    time_range: str
-
-class MedSafetyRequest(BaseModel):
-    mrn: str
-
-class MedSafetyResponse(BaseModel):
-    medications_raw: str
-    interactions_raw: str
-    context_chunks_used: int
-
-class PatientInfoResponse(BaseModel):
-    mrn: str
-    name: str
-    age: int | None
-    gender: str | None
-    last_encounter: str | None
-
-# ==============================
-# QUERY CLASSIFIER
-# ==============================
-
-def classify_query(question: str) -> str:
-    question_lower = question.lower()
-    structured_keywords = [
-        "contact", "phone", "birth", "gender",
-        "name", "created", "updated", "registered", "age"
-    ]
-    if "mrn" in question_lower:
-        for word in structured_keywords:
-            if word in question_lower:
-                return "RDBMS"
-    return "VECTOR"
-
-
-# ==============================
-# SQL QUERY HANDLER
-# ==============================
-
-def handle_rdbms_query(question: str, mrn: str) -> str:
-    db = SessionLocal()
-    mrn = clean_mrn(mrn)
-    question_lower = question.lower()
-
-    column_map = {
-        "contact": ["contact", "phone"],
-        "name": ["name"],
-        "gender": ["gender"],
-        "birth_date": ["birth", "dob"],
-        "created_at": ["created"],
-        "updated_at": ["updated"],
-    }
-
-    column = None
-    for col, keywords in column_map.items():
-        if any(kw in question_lower for kw in keywords):
-            column = col
-            break
-
-    if not column:
-        db.close()
-        return "Unsupported structured query."
-
-    try:
-        query = text(f"SELECT {column} FROM patient WHERE mrn = :mrn")
-        result = db.execute(query, {"mrn": mrn}).fetchone()
-        db.close()
-        if result and result[0]:
-            return f"The {column.replace('_', ' ')} of MRN {mrn} is: {result[0]}"
-        return f"No patient found with MRN {mrn}."
-    except Exception as e:
-        db.close()
-        raise HTTPException(status_code=500, detail=str(e))
-
+app = FastAPI()
 
 
 # ==============================
@@ -132,7 +24,7 @@ def handle_rdbms_query(question: str, mrn: str) -> str:
 
 @app.post("/api/upload_pdf")
 def upload_pdf(mrn: str, file: UploadFile = File(...)):
-    """Upload a discharge summary PDF and store chunks in AstraDB."""
+
     upload_dir = "uploads"
     os.makedirs(upload_dir, exist_ok=True)
 
@@ -149,128 +41,162 @@ def upload_pdf(mrn: str, file: UploadFile = File(...)):
 
     return {
         "filename": file.filename,
-        "mrn": clean_mrn(mrn),
         "total_chunks": len(chunks),
         "status": "Stored in AstraDB"
     }
 
 # ==============================
-# 2️⃣ LOAD PATIENT (structured DB)
+# 3️⃣ Request & Response Models
 # ==============================
 
-@app.get("/api/patient/{mrn}", response_model=PatientInfoResponse)
-def get_patient(mrn: str):
-    """Load patient demographic info from SQL DB."""
+class QueryRequest(BaseModel):
+    question: str
+
+
+class QueryResponse(BaseModel):
+    answer: str
+    query_type: str
+
+
+# ==============================
+# 4️⃣ Query Classifier
+# ==============================
+
+def classify_query(question: str):
+
+    question_lower = question.lower()
+
+    structured_keywords = [
+        "contact",
+        "phone",
+        "birth",
+        "gender",
+        "name",
+        "created",
+        "updated",
+        "registered"
+    ]
+
+    if "mrn" in question_lower:
+        for word in structured_keywords:
+            if word in question_lower:
+                return "RDBMS"
+
+    return "VECTOR"
+
+
+# ==============================
+# 5️⃣ SQL Query Handler
+# ==============================
+
+def handle_rdbms_query(question: str):
+
     db = SessionLocal()
-    mrn_clean = clean_mrn(mrn)
 
-    try:
-        result = db.execute(
-            text("SELECT mrn, name, age, gender, last_encounter FROM patient WHERE mrn = :mrn"),
-            {"mrn": mrn_clean}
-        ).fetchone()
+    words = question.split()
+    mrn = None
+
+    for word in words:
+        if "MRN" in word.upper():
+            mrn = word.upper().replace("?", "").strip()
+
+    if not mrn:
         db.close()
+        return "MRN not found"
 
-        if not result:
-            raise HTTPException(status_code=404, detail=f"Patient MRN {mrn_clean} not found.")
+    question_lower = question.lower()
 
-        return PatientInfoResponse(
-            mrn=result[0],
-            name=result[1],
-            age=result[2],
-            gender=result[3],
-            last_encounter=str(result[4]) if result[4] else None
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
+    if "contact" in question_lower or "phone" in question_lower:
+        column = "contact"
+
+    elif "name" in question_lower:
+        column = "name"
+
+    elif "gender" in question_lower:
+        column = "gender"
+
+    elif "birth" in question_lower or "dob" in question_lower:
+        column = "birth_date"
+
+    elif "created" in question_lower:
+        column = "created_at"
+
+    elif "updated" in question_lower:
+        column = "updated_at"
+
+    else:
         db.close()
-        raise HTTPException(status_code=500, detail=str(e))
+        return "Unsupported structured query"
+
+    query = text(f"SELECT {column} FROM patient WHERE mrn = :mrn")
+
+    result = db.execute(query, {"mrn": mrn}).fetchone()
+
+    db.close()
+
+    if result and result[0]:
+        return f"The {column} of {mrn} is {result[0]}"
+    else:
+        return f"No patient found with MRN {mrn}"
 
 
 # ==============================
-# 3️⃣ PATIENT QUERY (Tab 1)
+# 6️⃣ Ollama Function
+# ==============================
+
+def call_ollama(prompt: str):
+
+    response = requests.post(
+        "http://localhost:11434/api/generate",
+        json={
+            "model": "llama3.2:3b",
+            "prompt": prompt,
+            "stream": False
+        }
+    )
+
+    return response.json()["response"]
+
+
+# ==============================
+# 7️⃣ Query API
 # ==============================
 
 @app.post("/api/query", response_model=QueryResponse)
 def query_api(request: QueryRequest):
-    """
-    Hybrid query: routes to RDBMS for structured fields
-    or Vector DB for clinical questions.
-    """
+
     question = request.question
-    mrn = clean_mrn(request.mrn)
+
     query_type = classify_query(question)
 
+    # Structured Query
     if query_type == "RDBMS":
-        answer = handle_rdbms_query(question, mrn)
-        return QueryResponse(answer=answer, query_type="RDBMS", sources=[])
 
-    # VECTOR search
-    result = vector_search(question, mrn)
+        final_answer = handle_rdbms_query(question)
+
+    # Vector Query
+    else:
+
+    # Extract MRN from question
+        words = question.split()
+        mrn = None
+
+    for word in words:
+        if "MRN" in word.upper():
+            mrn = word.upper().replace("MRN","").replace("?","").strip()
+
+    if not mrn:
+        return QueryResponse(
+            answer="Please include MRN in the question for document search.",
+            query_type="VECTOR"
+        )
+
+    # Perform vector search
+    from astra_db import vector_search
+
+    final_answer = vector_search(question, mrn)
+
     return QueryResponse(
-        answer=result["answer"],
-        query_type="VECTOR",
-        sources=result.get("sources", [])
+        answer=final_answer,
+        query_type=query_type
     )
-
-
-# ==============================
-# 4️⃣ TIME-BASED SUMMARY (Tab 2)
-# ==============================
-
-@app.post("/api/time_summary", response_model=TimeSummaryResponse)
-def time_summary_api(request: TimeSummaryRequest):
-    """
-    Generate a chronological summary of patient history
-    for a selected time range.
-    Supported time_range values:
-      "Last 1 Month" | "Last 3 Months" | "Last 6 Months" | "Last 1 Year"
-    """
-    mrn = clean_mrn(request.mrn)
-    result = time_based_summary(mrn, request.time_range)
-    return TimeSummaryResponse(
-        summary=result["summary"],
-        time_range=result["time_range"]
-    )
-
-
-# ==============================
-# 5️⃣ MEDICATION SAFETY (Tab 3)
-# ==============================
-
-@app.post("/api/medication_safety", response_model=MedSafetyResponse)
-def medication_safety_api(request: MedSafetyRequest):
-    """
-    Extract all medications from patient record and
-    check for drug-drug interactions.
-    """
-    mrn = clean_mrn(request.mrn)
-    result = medication_safety_check(mrn)
-    return MedSafetyResponse(
-        medications_raw=result["medications_raw"],
-        interactions_raw=result["interactions_raw"],
-        context_chunks_used=result["context_chunks_used"]
-    )
-
-
-# ==============================
-# HEALTH CHECK
-# ==============================
-
-@app.get("/")
-def root():
-    return {"status": "✅ DMH API running", "version": "1.0"}
-
-@app.post("/ask")
-def ask_question(request: dict):
-
-    question = request["question"]
-    mrn = request["mrn"]
-
-    answer = vector_search(question, mrn)
-
-    return {
-        "answer": answer,
-        "query_type": "VECTOR"
-    }
