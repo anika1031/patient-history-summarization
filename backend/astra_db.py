@@ -18,10 +18,9 @@ collection = db.get_collection("patient_chunks")
 # ─────────────────────────────────────────
 # MRN CLEANER
 # ─────────────────────────────────────────
-def clean_mrn(mrn) -> int:        # ← remove type hint str, accept anything
-    cleaned = (
-        str(mrn)                  # ← add this line, converts 8 → "8" first
-        .upper()
+def clean_mrn(mrn: str) -> str:
+    return (
+        mrn.upper()
         .replace("MRN", "")
         .replace("MRD", "")
         .replace("#", "")
@@ -29,7 +28,7 @@ def clean_mrn(mrn) -> int:        # ← remove type hint str, accept anything
         .replace(":", "")
         .strip()
     )
-    return int(cleaned)
+
 
 # ─────────────────────────────────────────
 # EMBEDDING
@@ -42,6 +41,19 @@ def generate_embedding(text: str) -> list:
     response.raise_for_status()
     return response.json()["embedding"]
 
+
+# ─────────────────────────────────────────
+# SECTION FILTER
+# ─────────────────────────────────────────
+EXCLUDED_SECTIONS = [
+    "red flag", "follow-up", "follow up",
+    "advice on discharge", "general instructions",
+    "contact details", "emergency", "prepared by", "approved by"
+]
+
+def is_relevant_chunk(text: str) -> bool:
+    text_lower = text.lower()
+    return not any(section in text_lower for section in EXCLUDED_SECTIONS)
 
 
 # ─────────────────────────────────────────
@@ -113,24 +125,12 @@ def vector_search(question: str, mrn: str) -> dict:
     mrn = clean_mrn(mrn)
     print(f"[vector_search] MRN='{mrn}' | Q='{question}'")
 
-    # ADD THIS — check count before searching
-    count = collection.count_documents(filter={"mrn": mrn}, upper_bound=100)
-    print(f"Documents in DB for MRN {mrn}: {count}")
-
-    if count == 0:
-        return {
-            "answer": f"No records found for MRN {mrn}. Please ingest the document first.",
-            "sources": []
-        }
-
-    query_vector = generate_embedding(question)
-
     query_vector = generate_embedding(question)
 
     results = list(collection.find(
         filter={"mrn": mrn},
         sort={"$vector": query_vector},
-        limit=12,
+        limit=8,
         projection={"text": 1, "chunk_index": 1}
     ))
 
@@ -140,8 +140,15 @@ def vector_search(question: str, mrn: str) -> dict:
             "sources": []
         }
 
-    results.sort(key=lambda x: x.get("chunk_index", 0))
-    top_chunks = results[:7]
+    # Filter out irrelevant sections
+    filtered = [doc for doc in results if is_relevant_chunk(doc["text"])]
+
+    if not filtered:
+        return {"answer": "Not mentioned in the record.", "sources": []}
+
+    # Sort by chunk index to preserve document order
+    filtered.sort(key=lambda x: x.get("chunk_index", 0))
+    top_chunks = filtered[:5]
 
     context = "\n\n".join(
         f"[Chunk {i+1}]:\n{doc['text']}" for i, doc in enumerate(top_chunks)
@@ -149,9 +156,9 @@ def vector_search(question: str, mrn: str) -> dict:
 
     system_instruction = """You are a strict clinical medical assistant.
 - Answer ONLY using the medical record provided.
-- Use information from: Chief Complaints, Previous Medical/Surgical History,
-  Diagnosis, Clinical Examination, Course in Hospital, and Medications sections.
-- If the answer is genuinely not present anywhere in the record, reply: "Not mentioned in the record."
+- Only use "Chief Complaints", "History of Present Illness", or "Course in Hospital" sections.
+- Do NOT use Red Flag Signs, Advice, Instructions, or Follow-up sections.
+- If the answer is not found, reply: "Not mentioned in the record."
 - Be concise. Do NOT repeat the question or context."""
 
     answer = call_llm(system_instruction, context, question)
@@ -269,10 +276,7 @@ def medication_safety_check(mrn: str) -> dict:
 # ─────────────────────────────────────────
 # DEBUG HELPER
 # ─────────────────────────────────────────
-
 def debug_pipeline(question: str, mrn: str):
-    if __name__ == "__main__":
-        debug_pipeline("red flag signs", "8")
     mrn_clean = clean_mrn(mrn)
     print(f"\n{'='*50}")
     print(f"DEBUG MRN='{mrn_clean}' | Q='{question}'")
@@ -284,7 +288,7 @@ def debug_pipeline(question: str, mrn: str):
 
     if count == 0:
         print("❌ No documents found!")
-        sample = collection.find({}, limit=3, projection={"mrn": 1})
+        sample = collection.find({}, limit=5, projection={"mrn": 1})
         print("MRNs in DB:")
         for doc in sample:
             print(f"  - '{doc.get('mrn')}'")
@@ -305,5 +309,3 @@ def debug_pipeline(question: str, mrn: str):
 
     print(f"\n{'='*50}")
     print(" Pipeline OK")
-
-
