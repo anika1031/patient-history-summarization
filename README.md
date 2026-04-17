@@ -18,7 +18,7 @@ This system enables clinicians to ask **natural language queries** over patient 
 ### 2.1 Architecture Flow
 ```
 User Query → Query Classifier → Query Processor → Query Router →
-[RDBMS Agent | Vector DB Agent | Summarization Agent | Hybrid Agent] →
+[DBMS agent | Vector DB Agent | Summarization Agent | Hybrid Agent] →
 Response Generator → User
 ```
 
@@ -29,10 +29,10 @@ Response Generator → User
 
 First component that analyzes the user query to determine the optimal processing strategy. This prevents unnecessary processing and optimizes cost and speed.
 
-- **RDBMS Agent only:** For simple exact data queries (e.g., "What is the patient's phone number?")
+- **DBMS Agent only:** For simple exact data queries (e.g., "What is the patient's phone number?")
 - **Vector DB Agent:** For pure semantic queries (e.g., "Does patient have diabetes symptoms?")
 - **Summarization Agent:** For time-based queries (e.g., "Summarize last year")
-- **Hybrid Agent:** For complex queries requiring multiple data sources (e.g., "Follow-up procedure for MRN 12345")
+- **Hybrid Agent:** For complex queries requiring multiple data sources (e.g., "Follow-up procedure for MRN004")
 
 #### Query Processor
 
@@ -47,21 +47,17 @@ Splits multi-part queries and extracts entities (patient ID, dates, conditions).
 
 Routes queries to appropriate agents based on classification results.
 
-#### RDBMS Agent
+#### DBMS Agent
 
 Converts natural language to SQL queries using LLM, validates against schema, and executes queries. This agent is critical for the two-step process that ensures accurate ID matching.
 
 #### Vector DB Agent
 
-Performs semantic search with strict metadata filtering. After obtaining document_id from RDBMS queries, filters vector search results to prevent false positives.
+Performs semantic search with strict metadata filtering. After obtaining document_id from DBMS queries, filters vector search results to prevent false positives.
 
 #### Summarization Agent
 
 Handles time-based and conditional summaries using a hybrid approach of pre-computed summaries and on-the-fly generation.
-
-#### Response Generator
-
-Formats results into natural language with citations, confidence scores, and source attribution.
 
 ---
 
@@ -71,7 +67,7 @@ Formats results into natural language with citations, confidence scores, and sou
 
 **Why Two-Step Processing is Mandatory**
 
-Vector similarity search alone cannot guarantee exact ID matching. For example, MRN 12345 and 1234 may appear semantically similar, leading to incorrect patient data retrieval. Hence, exact identifiers must always be resolved using RDBMS before any semantic search.This ensures strict patient data isolation and prevents cross-patient information leakage.
+Vector similarity search alone cannot guarantee exact ID matching. For example, MRN001 and 004 may appear semantically similar, leading to incorrect patient data retrieval. Hence, exact identifiers must always be resolved using RDBMS before any semantic search.This ensures strict patient data isolation and prevents cross-patient information leakage.
 
 **Final Two-Step Strategy**
 **Step 1: Structured Lookup via RDBMS**
@@ -83,34 +79,33 @@ Vector similarity search alone cannot guarantee exact ID matching. For example, 
   - Resolve document_id linked to encounters
 
 **Step 2: Content Retrieval (Vector DB or S3)**
-- If document size is small or full context is required → load PDF directly from S3.
+- If document size is small or full context is required → load PDF directly
 - If document is large or query is semantic → query Vector DB with strict metadata filters (patient_id, encounter_id, document_id).
 - Retrieved content is passed to LLM for extraction/summarization.
 ---
 ### 2.4 Hybrid Retrieval Decision Logic 
 The system decides retrieval strategy based on query type:
-- Exact data queries → RDBMS only (no document access)
-- Semantic content queries → RDBMS + Vector DB
-- Full document understanding → RDBMS + S3
-- Complex medical queries → RDBMS + Vector DB + S3 (Hybrid)
+- Exact data queries → DBMS only (no document access)
+- Semantic content queries → DBMS + Vector DB
+- 
 Filtering Rules (Mandatory):
 - Vector DB queries must include document_id filter.
 - Encounter-level queries must include encounter_id.
 - Patient-level queries must always resolve patient_id first.
 
-#### Example Flow: "What is the follow-up procedure for patient MRN 12345?"
+#### Example Flow: "What is the follow-up procedure for patient MRN 004?"
 
 1. LLM generates SQL to find patient_id from MRN
 2. Query encounters for this patient, ordered by date (most recent first)
 3. Retrieve document_ids associated with recent encounters
-4. Either load PDFs from S3 OR query vector DB with document_id filter
+4. Either load PDFs  OR query vector DB with document_id filter
 5. Extract relevant information and generate response
 ```sql
 
 -- Step 1: Resolve patient_id (1 patient = 1 patient_id)
 SELECT patient_id 
 FROM patient 
-WHERE mrn = '12345';
+WHERE mrn = '004';
 
 -- Step 2: Resolve the most recent relevant encounter for this patient
 SELECT encounter_id 
@@ -137,12 +132,11 @@ WHERE d.encounter_id IN (
 
 To ensure modularity and maintainability:
 
-- **QueryClassifier** – Determines query type (RDBMS / Semantic / Summary / Hybrid)
+- **QueryClassifier** – Determines query type (DBMS / Semantic / Summary / Hybrid)
 - **QueryProcessor** – Extracts entities and normalizes temporal expressions
-- **RDBMSService** – Handles SQL generation and execution
+- **DBMSService** – Handles SQL generation and execution
 - **VectorSearchService** – Performs metadata-filtered semantic search
 - **SummarizationService** – Handles pre-computed and on-the-fly summaries
-- **StorageService (AWS)** – Manages S3 document access
 - **ResponseBuilder** – Formats final output with citations and confidence scores
 
 ---
@@ -151,7 +145,7 @@ To ensure modularity and maintainability:
 
 ### 3.1 RDBMS (FHIR-Compliant Schema)
 
-**Database:** PostgreSQL installed on AWS EC2 
+**Database:** PostgreSQL
 
 #### Patient Table DDL
 ```sql
@@ -267,7 +261,7 @@ To ensure schema consistency and prevent invalid data entry, the following enum-
 - annual
 ### 3.2 Vector Database
 
-**Technology:** ChromaDB (primary) / FAISS (alternative - to be tested)
+**Technology:** AstraDB (primary) 
 
 #### Indexing Strategy Options:
 
@@ -284,36 +278,13 @@ To ensure schema consistency and prevent invalid data entry, the following enum-
 
 | Metadata Field | Purpose | Example Value |
 |---|---|---|
-| patient_mrn | Patient-level filtering | "12345" |
+| patient_mrn | Patient-level filtering | "001" |
 | **document_id** | **Exact document matching (prevents false positives)** | **"doc_abc123"** |
 | encounter_id | Encounter-level queries | "enc_xyz789" |
 | document_date | Temporal filtering | "2024-10-15" |
 | document_type | Document type filtering | "discharge_summary" |
 | section_type | Section-based retrieval | "medications", "diagnosis" |
 
-
-### 3.3 File Storage (AWS S3)
-
-#### Organization Structure:
-```
-s3://bucket-name/
-├── {mrn_1}/
-│   ├── {encounter_id_1}.pdf
-│   ├── {encounter_id_2}.pdf
-│   └── ...
-├── {mrn_2}/
-│   ├── {encounter_id_3}.pdf
-│   └── ...
-└── ...
-
-Example: s3://healthcare-docs/12345/enc_2024_10_15.pdf
-```
-#### file_path Field 
-
-The `file_path` column in the document table stores the **full S3 object path**, not just the filename.
-
-**Example:**
-s3://healthcare-docs/12345/enc_2024_10_15.pdf
 
 #### Rationale:
 
@@ -339,7 +310,7 @@ s3://healthcare-docs/12345/enc_2024_10_15.pdf
 
 #### Approach:
 
-- Store PDFs in S3 with organized folder structure
+- Store PDFs  with organized folder structure
 - Retrieve document_id from RDBMS query
 - Load entire PDF content into memory
 - Pass complete document to LLM with user question
@@ -353,13 +324,11 @@ s3://healthcare-docs/12345/enc_2024_10_15.pdf
 
 #### Cons:
 
-- Expensive for large documents (LLM context token costs)
 - Slower processing time for lengthy documents
 - May exceed LLM context window for very long histories
 
 #### Best Use Cases:
 
-- Documents under 10 pages (~5,000 tokens)
 - Simple question-answering on recent encounters
 - When complete context is essential
 
@@ -562,7 +531,7 @@ For time-based queries such as ‘last 6 months’, the system always checks for
 ### Phase 1 : Setup & Data Preparation
 
 - Development environment setup
-- RDBMS schema implementation (PostgreSQL on EC2)
+- RDBMS schema implementation (PostgreSQL)
 - DDL script creation and database initialization
 - Synthetic data generation (awaiting PII-scrubbed samples from Angelin)
 - AWS S3 bucket setup and folder structure
@@ -581,24 +550,20 @@ For time-based queries such as ‘last 6 months’, the system always checks for
 - **Task 6:** Vector DB Agent with metadata filtering
 - **Task 7:** Summarization Agent (pre-computed + on-the-fly)
 - **Task 8:** Response Generator with citations
-- **Task 9:** Agent orchestration using LangGraph
-- **Task 10:** Implement all three retrieval strategies
+- **Task 9:** Implement all three retrieval strategies
 
 ### Phase 4 : Testing & Optimization
 
-- **Task 11:** Strategy comparison testing (A vs B vs C)
-- **Task 12:** Performance optimization
-- **Task 13:** Accuracy validation with ground truth
-- **Task 14:** Cost analysis per query type
-- **Task 15:** Security review and HIPAA compliance check
+- **Task 10:** Strategy comparison testing (A vs B vs C)
+- **Task 11:** Performance optimization
+- **Task 12:** Accuracy validation with ground truth
+- **Task 13:** Cost analysis per query type
 
 ### Phase 5 : Deployment & User Testing
 
-- **Task 16:** AWS EC2 deployment (PostgreSQL + Application)
-- **Task 17:** Streamlit UI development
-- **Task 18:** User acceptance testing
-- **Task 19:** Documentation and handover
-- **Task 20:** Hospital integration planning (if real data available)
+- **Task 14:** Streamlit UI development
+- **Task 15:** User acceptance testing
+- **Task 16:** Hospital integration planning (if real data available)
 
 ---
 ## 7. Technology Stack
@@ -606,19 +571,11 @@ For time-based queries such as ‘last 6 months’, the system always checks for
 | Component | Technology | Notes |
 |---|---|---|
 | Backend Framework | Python + FastAPI | With streaming support for real-time responses |
-| LLM | Claude Sonnet 4.5 | Primary model for all agent tasks |
-| RDBMS | PostgreSQL on AWS EC2 | 
-| Vector Database | ChromaDB (primary)<br/>FAISS (alternative) 
-| Agent Framework | **LangGraph** |
-| File Storage | AWS S3 | Organized by MRN/encounter_id structure |
+| LLM | Ollama - phi3:mini | Primary model for all agent tasks |
+| DBMS | PostgreSQL | 
+| Vector Database | Astra DB
+| Agent Framework |  |
 | Frontend | Streamlit | 
-| Infrastructure | AWS EC2 | Single EC2 instance for database + application |
-| Development Tools | GitHub, VS Code, Docker | Version control and containerization |
-
-AWS Bedrock Agent for:
-- Session-based conversation memory
-- Context retention across multi-turn clinical queries
-- Reducing prompt reconstruction overhead
 
 ---
 ## 8. API Schema (FastAPI)
@@ -781,15 +738,4 @@ Response:
 ---
 ## UI Design – Patient History Summarization System
 
-We have created a **Figma prototype** for the clinician-facing web interface that aligns with our design document and backend architecture.
-
-👉 **View the interactive UI design here:**  
-🔗 https://www.figma.com/make/Gb3nDKB32xbzSHglLDyaXq/Patient-History-Summarization-UI?t=auKjKBL9HOusSeM4-1
-
-This prototype includes:
-- Patient query dashboard
-- Time-based summary interface
-- Medication interaction view
-- Answer / citations panel
-
-Use this link to explore layout, component hierarchy, and user flow.
+<img width="844" height="405" alt="image" src="https://github.com/user-attachments/assets/23338b56-6d5e-4cd4-827b-669f19b5f999" />
