@@ -1,26 +1,36 @@
+# ─────────────────────────────────────────
+# 1️⃣ Imports & Setup
+# ─────────────────────────────────────────
+
 from astrapy.client import DataAPIClient
 from dotenv import load_dotenv
 import os
-import requests
+import re
+
+from embedding_utils import generate_embedding
 
 load_dotenv()
 
+
+# Astra DB Config
 ASTRA_DB_API_ENDPOINT = os.getenv("ASTRA_DB_API_ENDPOINT")
 ASTRA_DB_APPLICATION_TOKEN = os.getenv("ASTRA_DB_APPLICATION_TOKEN")
-OLLAMA_BASE_URL = "http://localhost:11434"
 
-# Connect to AstraDB
-client = DataAPIClient(ASTRA_DB_APPLICATION_TOKEN)
-db = client.get_database_by_api_endpoint(ASTRA_DB_API_ENDPOINT)
+# Connect to Astra DB
+astra_client = DataAPIClient(ASTRA_DB_APPLICATION_TOKEN)
+db = astra_client.get_database_by_api_endpoint(ASTRA_DB_API_ENDPOINT)
 collection = db.get_collection("patient_chunks")
-
+# collection.delete_many({})
+# print("✅ All old embeddings deleted")
 
 # ─────────────────────────────────────────
-# MRN CLEANER
+# 2️⃣ MRN CLEANER
 # ─────────────────────────────────────────
-def clean_mrn(mrn: str) -> str:
-    return (
-        mrn.upper()
+
+def clean_mrn(mrn) -> str:
+    cleaned = (
+        str(mrn)
+        .upper()
         .replace("MRN", "")
         .replace("MRD", "")
         .replace("#", "")
@@ -28,284 +38,290 @@ def clean_mrn(mrn: str) -> str:
         .replace(":", "")
         .strip()
     )
+    return f"MRN{cleaned.zfill(3)}"
 
 
 # ─────────────────────────────────────────
-# EMBEDDING
+# 3️⃣ SECTION-BASED CHUNKING
 # ─────────────────────────────────────────
-def generate_embedding(text: str) -> list:
-    response = requests.post(
-        f"{OLLAMA_BASE_URL}/api/embeddings",
-        json={"model": "nomic-embed-text", "prompt": text}
-    )
-    response.raise_for_status()
-    return response.json()["embedding"]
 
-
-# ─────────────────────────────────────────
-# SECTION FILTER
-# ─────────────────────────────────────────
-EXCLUDED_SECTIONS = [
-    "red flag", "follow-up", "follow up",
-    "advice on discharge", "general instructions",
-    "contact details", "emergency", "prepared by", "approved by"
+SECTION_HEADERS = [
+    "CHIEF COMPLAINT",
+    "HISTORY OF PRESENT ILLNESS",
+    "PAST MEDICAL HISTORY",
+    "PHYSICAL EXAMINATION",
+    "INVESTIGATIONS",
+    "DIAGNOSIS",
+    "TREATMENT",
+    "DISCHARGE MEDICATIONS",
+    "ADVICE ON DISCHARGE",
+    "FOLLOW-UP",
+    "SPECIAL NEEDS",
+    "RED FLAG SIGNS",      
+    "PROCEDURE DETAILS",
+    "PROCEDURE PERFORMED",
+    "STATUS AT DISCHARGE",
+    "REFERENCE",
+    "CONTACT DETAILS",
+    "IN CASE OF EMERGENCY",
+    "PREPARED BY",
+    "APPROVED BY",
+    "SURGEON",              
+    "HISTORY",
+    "EXAMINATION",
+    "DISCHARGE SUMMARY",
 ]
 
-def is_relevant_chunk(text: str) -> bool:
-    text_lower = text.lower()
-    return not any(section in text_lower for section in EXCLUDED_SECTIONS)
+def split_by_sections(text: str) -> list:
+    """
+    Split discharge summary into labeled section chunks using known headers.
+    Returns list of dicts: {"section": str, "text": str}
+    """
+    pattern = r'(' + '|'.join(re.escape(h) for h in SECTION_HEADERS) + r')[:\s]*'
+    parts = re.split(pattern, text, flags=re.IGNORECASE)
+
+    chunks = []
+    i = 1
+    while i < len(parts) - 1:
+        section_name = parts[i].strip().upper()
+        section_body = parts[i + 1].strip()
+
+        if section_body and len(section_body) > 10:
+            chunks.append({
+                "section": section_name,
+                "text": f"{section_name}:\n{section_body}"
+            })
+        i += 2
+
+    # Fallback: if no sections detected, chunk by character size
+    if not chunks:
+        print("⚠️ No sections detected — falling back to character chunking")
+        chunk_size = 500
+        for i in range(0, len(text), chunk_size):
+            chunk_text = text[i:i + chunk_size].strip()
+            if len(chunk_text) > 20:
+                chunks.append({
+                    "section": f"CHUNK_{i // chunk_size}",
+                    "text": chunk_text
+                })
+
+    return chunks
 
 
 # ─────────────────────────────────────────
-# STORE CHUNKS
+# 4️⃣ STORE CHUNKS
 # ─────────────────────────────────────────
-def store_chunks(mrn: str, chunks: list):
+
+def store_chunks(mrn: str, raw_text: str):
+    """
+    Delete old embeddings for this MRN, re-chunk by section, and store.
+    Pass raw discharge summary text as `raw_text`.
+    """
     mrn = clean_mrn(mrn)
-    print(f"Storing {len(chunks)} chunks for MRN: '{mrn}'")
+
+    # Delete old records for this MRN before re-ingesting
+    delete_result = collection.delete_many({"mrn": mrn})
+    print(f"🗑️ Deleted old chunks for {mrn}: {delete_result.deleted_count} records")
+
+    chunks = split_by_sections(raw_text)
+    print(f"📦 Storing {len(chunks)} section-chunks for MRN: {mrn}")
+
     for i, chunk in enumerate(chunks):
-        embedding = generate_embedding(chunk)
+        embedding = generate_embedding(chunk["text"])
+
         collection.insert_one({
             "mrn": mrn,
             "chunk_index": i,
-            "text": chunk,
+            "section": chunk["section"],
+            "text": chunk["text"],
             "$vector": embedding
         })
-    print(f"✅ Done storing for MRN: '{mrn}'")
+
+    print(f"✅ Stored {len(chunks)} sections for {mrn}")
 
 
 # ─────────────────────────────────────────
-# CALL LLM
+# 5️⃣ RELEVANT LINE EXTRACTOR
 # ─────────────────────────────────────────
-def call_llm(system_instruction: str, context: str, question: str) -> str:
-    prompt = f"""<|start_header_id|>system<|end_header_id|>
-{system_instruction}
-<|eot_id|>
 
-<|start_header_id|>user<|end_header_id|>
-MEDICAL RECORD:
-\"\"\"
-{context}
-\"\"\"
-
-QUESTION: {question}
-<|eot_id|>
-
-<|start_header_id|>assistant<|end_header_id|>
-"""
-    response = requests.post(
-        f"{OLLAMA_BASE_URL}/api/generate",
-        json={
-            "model": "llama3.2:3b",
-            "prompt": prompt,
-            "stream": False,
-            "options": {
-                "temperature": 0.0,
-                "repeat_penalty": 1.2,
-                "top_p": 0.85,
-                "top_k": 40,
-                "num_predict": 400,
-                "stop": [
-                    "<|eot_id|>",
-                    "<|start_header_id|>",
-                    "QUESTION:",
-                    "MEDICAL RECORD:"
-                ]
-            }
-        }
-    )
-    response.raise_for_status()
-    answer = response.json()["response"].strip()
-    return answer if answer and len(answer) > 5 else "Not mentioned in the record."
+STOPWORDS = {
+    "what", "was", "the", "is", "did", "with", "for", "patient",
+    "a", "an", "of", "in", "on", "to", "and", "or", "that",
+    "this", "are", "were", "has", "have", "been", "at", "by"
+}
 
 
+# ─── Fix 2: Strip section header from chunk body in display ───
+def extract_relevant_portion(text: str, question: str, max_lines: int = 20) -> str:
+    keywords = set(question.lower().split()) - STOPWORDS
+
+    lines = text.split("\n")
+    scored_lines = []
+
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+
+        # ✅ Fix 2: Skip the section header line (already shown in 📄 label)
+        is_header = any(
+            line.upper().startswith(h) for h in SECTION_HEADERS
+        )
+        if is_header:
+            continue
+
+        score = sum(1 for kw in keywords if kw in line.lower())
+        scored_lines.append((score, line))
+
+    relevant = [line for score, line in scored_lines if score > 0]
+
+    if not relevant:
+        # Fallback: return all non-header lines
+        relevant = [line for _, line in scored_lines[:max_lines]]
+
+    return "\n".join(relevant[:max_lines])
 # ─────────────────────────────────────────
-# TAB 1 — VECTOR SEARCH (Patient Query)
+# 6️⃣ VECTOR SEARCH (RAG)
 # ─────────────────────────────────────────
+
+# ─── Fix 1: Remove duplicate header in vector_search ───
 def vector_search(question: str, mrn: str) -> dict:
     mrn = clean_mrn(mrn)
-    print(f"[vector_search] MRN='{mrn}' | Q='{question}'")
-
     query_vector = generate_embedding(question)
 
     results = list(collection.find(
         filter={"mrn": mrn},
         sort={"$vector": query_vector},
-        limit=8,
-        projection={"text": 1, "chunk_index": 1}
+        limit=3,
+        projection={"text": 1, "chunk_index": 1, "section": 1}
     ))
 
     if not results:
-        return {
-            "answer": "No relevant medical information found for this patient.",
-            "sources": []
-        }
+        return {"answer": "No relevant medical information found.", "sources": []}
 
-    # Filter out irrelevant sections
-    filtered = [doc for doc in results if is_relevant_chunk(doc["text"])]
+    formatted_parts = []
 
-    if not filtered:
-        return {"answer": "Not mentioned in the record.", "sources": []}
+    for doc in results:
+        text = doc.get("text", "").strip()
+        section = doc.get("section", "")
 
-    # Sort by chunk index to preserve document order
-    filtered.sort(key=lambda x: x.get("chunk_index", 0))
-    top_chunks = filtered[:5]
+        if len(text) < 20:
+            continue
 
-    context = "\n\n".join(
-        f"[Chunk {i+1}]:\n{doc['text']}" for i, doc in enumerate(top_chunks)
-    )
+        relevant = extract_relevant_portion(text, question)
 
-    system_instruction = """You are a strict clinical medical assistant.
-- Answer ONLY using the medical record provided.
-- Only use "Chief Complaints", "History of Present Illness", or "Course in Hospital" sections.
-- Do NOT use Red Flag Signs, Advice, Instructions, or Follow-up sections.
-- If the answer is not found, reply: "Not mentioned in the record."
-- Be concise. Do NOT repeat the question or context."""
+        if relevant:
+            # ✅ Fix 1: text already contains section header, don't repeat it
+            formatted_parts.append(f"📄 **{section}**\n{relevant}")
 
-    answer = call_llm(system_instruction, context, question)
+    # Deduplicate
+    seen = set()
+    unique_parts = []
+    for part in formatted_parts:
+        if part not in seen:
+            seen.add(part)
+            unique_parts.append(part)
+
+    answer = "\n\n---\n\n".join(unique_parts) if unique_parts else "No specific information found."
 
     sources = [
         {
             "chunk_index": doc.get("chunk_index", i),
-            "preview": doc["text"][:120] + "..."
+            "section": doc.get("section", "Unknown"),
+            "preview": doc["text"][:100] + "..."
         }
-        for i, doc in enumerate(top_chunks)
+        for i, doc in enumerate(results)
     ]
 
     return {"answer": answer, "sources": sources}
-
-
 # ─────────────────────────────────────────
-# TAB 2 — TIME-BASED SUMMARY
+# 7️⃣ TIME-BASED SUMMARY
 # ─────────────────────────────────────────
+
 def time_based_summary(mrn: str, time_range: str = "Last 6 Months") -> dict:
     mrn = clean_mrn(mrn)
-    print(f"[time_based_summary] MRN='{mrn}' | Range='{time_range}'")
 
     results = list(collection.find(
         filter={"mrn": mrn},
-        limit=20,
-        projection={"text": 1, "chunk_index": 1}
+        limit=5,
+        projection={"text": 1, "chunk_index": 1, "section": 1}
     ))
 
     if not results:
         return {
-            "summary": "No medical records found for this patient.",
+            "summary": "No medical records found.",
             "time_range": time_range
         }
 
     results.sort(key=lambda x: x.get("chunk_index", 0))
-    context = "\n\n".join(
-        f"[Chunk {i+1}]:\n{doc['text']}" for i, doc in enumerate(results)
-    )
 
-    system_instruction = f"""You are a clinical medical assistant generating a chronological patient summary.
-- Summarize the patient's medical history for: {time_range}
-- Structure your answer chronologically with key medical events.
-- Include: diagnoses, treatments, medications, and outcomes.
-- Do NOT invent information not present in the record.
-- Format using bullet points by time period if dates are available."""
+    # Pick clinically meaningful sections for summary
+    priority_sections = {
+        "DIAGNOSIS", "DISCHARGE MEDICATIONS",
+        "STATUS AT DISCHARGE", "FOLLOW-UP", "ADVICE ON DISCHARGE"
+    }
 
-    summary = call_llm(
-        system_instruction,
-        context,
-        f"Generate a chronological medical summary for the {time_range}."
-    )
-    return {"summary": summary, "time_range": time_range}
+    summary_parts = []
+    for doc in results:
+        section = doc.get("section", "").upper()
+        text = doc.get("text", "").strip()
 
+        if section in priority_sections and text:
+            summary_parts.append(f"**{section}**\n{text[:400]}")
 
-# ─────────────────────────────────────────
-# TAB 3 — MEDICATION SAFETY
-# ─────────────────────────────────────────
-def medication_safety_check(mrn: str) -> dict:
-    mrn = clean_mrn(mrn)
-    print(f"[medication_safety_check] MRN='{mrn}'")
+    # Fallback if no priority sections found
+    if not summary_parts:
+        summary_parts = [doc["text"][:300] for doc in results]
 
-    query_vector = generate_embedding(
-        "medications prescribed discharge drugs tablets injections"
-    )
-
-    results = list(collection.find(
-        filter={"mrn": mrn},
-        sort={"$vector": query_vector},
-        limit=6,
-        projection={"text": 1, "chunk_index": 1}
-    ))
-
-    if not results:
-        return {
-            "medications_raw": "No medication records found.",
-            "interactions_raw": "No medication records found.",
-            "context_chunks_used": 0
-        }
-
-    results.sort(key=lambda x: x.get("chunk_index", 0))
-    context = "\n\n".join(
-        f"[Chunk {i+1}]:\n{doc['text']}" for i, doc in enumerate(results)
-    )
-
-    med_system = """You are a clinical pharmacist assistant.
-- Extract ONLY the medication names and dosages from the medical record.
-- Return them as a numbered list. Example: 1. Amlodipine 5mg - once daily
-- Include both hospital medications and discharge medications.
-- If no medications found, say: "No medications found." """
-
-    medications_raw = call_llm(
-        med_system,
-        context,
-        "List all medications mentioned in this record with their dosages."
-    )
-
-    interaction_system = """You are a clinical pharmacist checking for drug-drug interactions.
-- Based on the medications listed, identify any known interactions.
-- For each: Drug A + Drug B → Risk level (Minor/Moderate/Major) → What to monitor.
-- If no interactions, say: "No significant interactions detected." """
-
-    interactions_raw = call_llm(
-        interaction_system,
-        f"Patient medications:\n{medications_raw}",
-        "Check for drug-drug interactions among these medications."
-    )
+    summary = "\n\n---\n\n".join(summary_parts)
 
     return {
-        "medications_raw": medications_raw,
-        "interactions_raw": interactions_raw,
-        "context_chunks_used": len(results)
+        "summary": summary,
+        "time_range": time_range
     }
 
 
 # ─────────────────────────────────────────
-# DEBUG HELPER
+# 8️⃣ MEDICATION SAFETY CHECK
 # ─────────────────────────────────────────
-def debug_pipeline(question: str, mrn: str):
-    mrn_clean = clean_mrn(mrn)
-    print(f"\n{'='*50}")
-    print(f"DEBUG MRN='{mrn_clean}' | Q='{question}'")
 
-    count = collection.count_documents(
-        filter={"mrn": mrn_clean}, upper_bound=100
-    )
-    print(f"Chunks stored: {count}")
+def medication_safety_check(mrn: str) -> dict:
+    mrn = clean_mrn(mrn)
 
-    if count == 0:
-        print("❌ No documents found!")
-        sample = collection.find({}, limit=5, projection={"mrn": 1})
-        print("MRNs in DB:")
-        for doc in sample:
-            print(f"  - '{doc.get('mrn')}'")
-        return
+    query_vector = generate_embedding("discharge medications prescriptions drugs dosage")
 
-    query_vector = generate_embedding(question)
     results = list(collection.find(
-        filter={"mrn": mrn_clean},
+        filter={"mrn": mrn},
         sort={"$vector": query_vector},
-        limit=5,
-        projection={"text": 1, "chunk_index": 1}
+        limit=3,
+        projection={"text": 1, "section": 1}
     ))
 
-    print(f"Vector search returned {len(results)} chunks")
-    for i, doc in enumerate(results):
-        print(f"\n--- Chunk {i+1} ---")
-        print(doc["text"][:300])
+    if not results:
+        return {
+            "medications_raw": "No medications found.",
+            "interactions_raw": "No data.",
+            "context_chunks_used": 0
+        }
 
-    print(f"\n{'='*50}")
-    print(" Pipeline OK")
+    # Prefer the DISCHARGE MEDICATIONS section specifically
+    med_chunks = [
+        doc for doc in results
+        if "MEDICATION" in doc.get("section", "").upper()
+    ]
+
+    # Fall back to all results if section not found
+    if not med_chunks:
+        med_chunks = results
+
+    medications = "\n\n".join(
+        doc["text"].strip()
+        for doc in med_chunks
+        if len(doc.get("text", "").strip()) > 20
+    )
+
+    return {
+        "medications_raw": medications,
+        "interactions_raw": "⚠️ Interaction check not available (LLM removed)",
+        "context_chunks_used": len(med_chunks)
+    }
