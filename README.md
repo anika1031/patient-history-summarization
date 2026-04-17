@@ -18,7 +18,7 @@ This system enables clinicians to ask **natural language queries** over patient 
 ### 2.1 Architecture Flow
 ```
 User Query → Query Classifier → Query Processor → Query Router →
-[DBMS agent | Vector DB Agent | Summarization Agent | Hybrid Agent] →
+[RDBMS agent | Vector DB Agent | Summarization Agent | Hybrid Agent] →
 Response Generator → User
 ```
 
@@ -29,7 +29,7 @@ Response Generator → User
 
 First component that analyzes the user query to determine the optimal processing strategy. This prevents unnecessary processing and optimizes cost and speed.
 
-- **DBMS Agent only:** For simple exact data queries (e.g., "What is the patient's phone number?")
+- **RDBMS Agent only:** For simple exact data queries (e.g., "What is the patient's phone number?")
 - **Vector DB Agent:** For pure semantic queries (e.g., "Does patient have diabetes symptoms?")
 - **Summarization Agent:** For time-based queries (e.g., "Summarize last year")
 - **Hybrid Agent:** For complex queries requiring multiple data sources (e.g., "Follow-up procedure for MRN004")
@@ -47,13 +47,13 @@ Splits multi-part queries and extracts entities (patient ID, dates, conditions).
 
 Routes queries to appropriate agents based on classification results.
 
-#### DBMS Agent
+#### RDBMS Agent
 
 Converts natural language to SQL queries using LLM, validates against schema, and executes queries. This agent is critical for the two-step process that ensures accurate ID matching.
 
 #### Vector DB Agent
 
-Performs semantic search with strict metadata filtering. After obtaining document_id from DBMS queries, filters vector search results to prevent false positives.
+Performs semantic search with strict metadata filtering. After obtaining document_id from RDBMS queries, filters vector search results to prevent false positives.
 
 #### Summarization Agent
 
@@ -67,13 +67,13 @@ Handles time-based and conditional summaries using a hybrid approach of pre-comp
 
 **Why Two-Step Processing is Mandatory**
 
-Vector similarity search alone cannot guarantee exact ID matching. For example, MRN001 and 004 may appear semantically similar, leading to incorrect patient data retrieval. Hence, exact identifiers must always be resolved using RDBMS before any semantic search.This ensures strict patient data isolation and prevents cross-patient information leakage.
+Vector similarity search alone cannot guarantee exact ID matching. For example, MRN001 and 004 may appear semantically similar, leading to incorrect patient data retrieval. Hence, exact identifiers must always be resolved using RRDBMS before any semantic search.This ensures strict patient data isolation and prevents cross-patient information leakage.
 
 **Final Two-Step Strategy**
-**Step 1: Structured Lookup via RDBMS**
+**Step 1: Structured Lookup via RRDBMS**
 - User query is analyzed by the Query Classifier.
 - Query Processor extracts entities such as MRN, encounter date, condition, and time range.
-- RDBMS Agent generates SQL to:
+- RRDBMS Agent generates SQL to:
   - Resolve patient_id from MRN
   - Resolve relevant encounter_id based on date/type
   - Resolve document_id linked to encounters
@@ -85,8 +85,8 @@ Vector similarity search alone cannot guarantee exact ID matching. For example, 
 ---
 ### 2.4 Hybrid Retrieval Decision Logic 
 The system decides retrieval strategy based on query type:
-- Exact data queries → DBMS only (no document access)
-- Semantic content queries → DBMS + Vector DB
+- Exact data queries → RDBMS only (no document access)
+- Semantic content queries → RDBMS + Vector DB
 - 
 Filtering Rules (Mandatory):
 - Vector DB queries must include document_id filter.
@@ -132,9 +132,9 @@ WHERE d.encounter_id IN (
 
 To ensure modularity and maintainability:
 
-- **QueryClassifier** – Determines query type (DBMS / Semantic / Summary / Hybrid)
+- **QueryClassifier** – Determines query type (RDBMS / Semantic / Summary / Hybrid)
 - **QueryProcessor** – Extracts entities and normalizes temporal expressions
-- **DBMSService** – Handles SQL generation and execution
+- **RDBMSService** – Handles SQL generation and execution
 - **VectorSearchService** – Performs metadata-filtered semantic search
 - **SummarizationService** – Handles pre-computed and on-the-fly summaries
 - **ResponseBuilder** – Formats final output with citations and confidence scores
@@ -143,7 +143,7 @@ To ensure modularity and maintainability:
 
 ## 3. Data Architecture
 
-### 3.1 RDBMS (FHIR-Compliant Schema)
+### 3.1 RRDBMS (FHIR-Compliant Schema)
 
 **Database:** PostgreSQL
 
@@ -295,7 +295,7 @@ To ensure schema consistency and prevent invalid data entry, the following enum-
 
 #### Access Pattern:
 
-1. Query RDBMS to get document_id for specific encounter
+1. Query RRDBMS to get document_id for specific encounter
 2. Retrieve file_path from document table
 3. Load PDF from S3 using file_path
 4. Process document content
@@ -311,7 +311,7 @@ To ensure schema consistency and prevent invalid data entry, the following enum-
 #### Approach:
 
 - Store PDFs  with organized folder structure
-- Retrieve document_id from RDBMS query
+- Retrieve document_id from RRDBMS query
 - Load entire PDF content into memory
 - Pass complete document to LLM with user question
 
@@ -338,7 +338,7 @@ To ensure schema consistency and prevent invalid data entry, the following enum-
 
 - Vectorize all document content during ingestion
 - Store comprehensive metadata with each chunk
-- After RDBMS query returns document_id, filter vector search by exact document_id match
+- After RRDBMS query returns document_id, filter vector search by exact document_id match
 - Retrieve only semantically relevant chunks
 
 #### Implementation Options:
@@ -369,7 +369,7 @@ To ensure schema consistency and prevent invalid data entry, the following enum-
 
 #### Approach:
 
-- Use RDBMS for all exact data retrieval (names, dates, IDs, contact info)
+- Use RRDBMS for all exact data retrieval (names, dates, IDs, contact info)
 - Use Vector DB with filtering for semantic searches
 - Combine both sources for complex queries
 - Query classifier determines which strategy to use
@@ -413,7 +413,7 @@ We will implement all three strategies and measure:
 
 ### 5.1 Query Types Supported
 
-#### Type 1: Exact Data Queries (RDBMS Only)
+#### Type 1: Exact Data Queries (RRDBMS Only)
 
 **Examples:**
 - "What is the name of patient with MRN 12345?"
@@ -421,8 +421,8 @@ We will implement all three strategies and measure:
 - "When was the last encounter for MRN 67890?"
 
 **Processing Flow:**
-1. Query Classifier identifies as RDBMS-only query
-2. RDBMS Agent generates SQL
+1. Query Classifier identifies as RRDBMS-only query
+2. RRDBMS Agent generates SQL
 3. Execute query and return result directly
 4. No document retrieval needed
 
@@ -434,7 +434,7 @@ We will implement all three strategies and measure:
 - "Does Mr. Joglekar have drug interactions?"
 
 **Processing Flow:**
-1. Get patient_id from RDBMS using MRN
+1. Get patient_id from RRDBMS using MRN
 2. Get relevant document_ids from recent encounters
 3. Search Vector DB with semantic query + document_id filter
 4. Return relevant chunks with citations
@@ -448,7 +448,7 @@ We will implement all three strategies and measure:
 
 **Processing Flow:**
 1. Normalize temporal reference (e.g., "last year" → 2024-01-01 to 2024-12-31)
-2. Query RDBMS for encounters in date range
+2. Query RRDBMS for encounters in date range
 3. Check encounter_summary table for pre-computed summaries
 4. If available, return pre-computed summaries
 5. If not, generate on-the-fly from documents
@@ -464,7 +464,7 @@ We will implement all three strategies and measure:
 > **Scope Clarification:** Conditional summaries are for SINGLE PATIENT only. Cross-patient analytics are out of scope for Phase 1.
 
 **Processing Flow:**
-1. Get all encounter_ids for patient from RDBMS
+1. Get all encounter_ids for patient from RRDBMS
 2. Search Vector DB for condition-specific content with encounter_id filters
 3. Rank encounters by relevance to condition
 4. Generate conditional summary focusing on matching content
@@ -531,7 +531,7 @@ For time-based queries such as ‘last 6 months’, the system always checks for
 ### Phase 1 : Setup & Data Preparation
 
 - Development environment setup
-- RDBMS schema implementation (PostgreSQL)
+- RRDBMS schema implementation (PostgreSQL)
 - DDL script creation and database initialization
 - Synthetic data generation (awaiting PII-scrubbed samples from Angelin)
 - AWS S3 bucket setup and folder structure
@@ -541,7 +541,7 @@ For time-based queries such as ‘last 6 months’, the system always checks for
 
 - **Task 1:** Query Classifier Agent implementation
 - **Task 2:** Query Processor with temporal normalization
-- **Task 3:** RDBMS Agent (SQL generation & execution)
+- **Task 3:** RRDBMS Agent (SQL generation & execution)
 - **Task 4:** Vector DB setup and document ingestion
 - **Task 5:** Document retrieval from S3
 
@@ -572,7 +572,7 @@ For time-based queries such as ‘last 6 months’, the system always checks for
 |---|---|---|
 | Backend Framework | Python + FastAPI | With streaming support for real-time responses |
 | LLM | Ollama - phi3:mini | Primary model for all agent tasks |
-| DBMS | PostgreSQL | 
+| RDBMS | PostgreSQL | 
 | Vector Database | Astra DB
 | Agent Framework |  |
 | Frontend | Streamlit | 
@@ -603,7 +603,7 @@ Response (Streaming Supported):
       "relevance_score": "float"
     }
   ],
-  "query_type": "hybrid | rdbms | semantic | summary",
+  "query_type": "hybrid | rRDBMS | semantic | summary",
   "processing_time_ms": "float",
   "confidence_score": "float",
   "strategy_used": "A | B | C"
@@ -728,7 +728,7 @@ Response:
 
 **Query 5: "What is the contact number for MRN 12345?"**
 
-**Type:** RDBMS Only
+**Type:** RRDBMS Only
 
 **Flow:**
 1. Extract MRN.
