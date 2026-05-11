@@ -1,9 +1,11 @@
 fastapi
 uvicorn
-psycopg2-binary
-sqlalchemy
-boto3
-chromadb
 pypdf
-langchain
+astrapy
+pdfplumber
+pdfminer.six
 python-dotenv
+sqlalchemy
+python-multipart
+requests
+pymysql
