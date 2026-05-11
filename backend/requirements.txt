@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+pypdf
+astrapy
+pdfplumber
+pdfminer.six
+python-dotenv
+sqlalchemy
+python-multipart
+requests
+pymysql
