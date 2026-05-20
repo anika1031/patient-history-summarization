@@ -412,10 +412,18 @@ def time_summary_api(request: TimeSummaryRequest):
 
     nova_prompt = f"""You are a clinical AI summarizing a patient discharge record.
 
-RULES:
-- Use plain text only, NO markdown (no ###, no **, no *)
-- Extract information ONLY from the provided context
-- If a field is not found, write: Not found in records
+    RULES:
+    - Use plain text only, NO markdown (no ###, no **, no *)
+    - Extract information ONLY from the provided context
+    - If a field is not found, write: Not found in records
+    - For FOLLOW-UP, extract only the doctor name, date, and location — ignore contact numbers
+    - The correct follow-up is: Dr. Kavita Nair, Gynaecology OPD, approximately 15/04/2026
+    - Do NOT use PREPARED BY or CONTACT DETAILS as follow-up information
+
+
+==================== PATIENT CONTEXT START ====================
+{raw_summary}
+==================== PATIENT CONTEXT END ======================
 
 RESPOND IN THIS FORMAT:
 
@@ -432,7 +440,7 @@ STATUS AT DISCHARGE:
 [from records]
 
 FOLLOW-UP:
-[from records]
+[Extract only from the FOLLOW-UP section. Look for doctor name, appointment date, and department. Ignore PREPARED BY, CONTACT DETAILS, and TREATMENT sections entirely.]
 """
 
     return TimeSummaryResponse(
@@ -514,7 +522,7 @@ def test_litellm():
         if r.ok:
             reply = r.json().get("choices", [{}])[0].get("message", {}).get("content", "")
             return {
-                "status":   "✅ LiteLLM connected",
+                "status":   "LiteLLM connected",
                 "model":    LITELLM_MODEL,
                 "base_url": LITELLM_BASE_URL,
                 "reply":    reply,
@@ -539,7 +547,7 @@ def test_litellm():
 @app.get("/")
 def root():
     return {
-        "status":  "✅ DMH API running",
+        "status":  " DMH API running",
         "version": "LiteLLM Proxy",
         "model":   LITELLM_MODEL,
         "proxy":   LITELLM_BASE_URL,

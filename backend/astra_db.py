@@ -49,6 +49,8 @@ SECTION_HEADERS = [
     "CHIEF COMPLAINTS AND PROGRESS",
     "CHIEF COMPLAINTS",
     "HISTORY OF PRESENT ILLNESS",
+    "MEDICATIONS",
+    "LAB RESULTS",
     "PAST MEDICAL HISTORY",
     "PREVIOUS MEDICAL / SURGICAL HISTORY",
     "PREVIOUS MEDICAL SURGICAL HISTORY",
@@ -78,6 +80,7 @@ SECTION_HEADERS = [
     "EXAMINATION",
     "DISCHARGE SUMMARY",
     "GENERAL INSTRUCTIONS",
+    
 ]
 
 
@@ -139,14 +142,14 @@ def split_by_sections(text: str):
 
     # ── Step 3: Fallback — paragraph split if no known headers found ───────
     if not chunks:
-        print("⚠️ No known section headers detected — using paragraph fallback")
+        print(" No known section headers detected — using paragraph fallback")
         paragraphs = [p.strip() for p in text.split("\n\n") if len(p.strip()) > 50]
         for i, para in enumerate(paragraphs):
             chunks.append({"section": f"PARAGRAPH_{i}", "text": para})
 
     # ── Step 4: Final fallback ─────────────────────────────────────────────
     if not chunks:
-        print("⚠️ Paragraph fallback failed — storing full document as one chunk")
+        print(" Paragraph fallback failed — storing full document as one chunk")
         chunks = [{"section": "FULL_DOCUMENT", "text": text}]
 
     return chunks
@@ -155,7 +158,7 @@ def split_by_sections(text: str):
 # 5️⃣ Store Chunks
 # ─────────────────────────────────────────
 
-def store_chunks(mrn: str, raw_text: str):
+def store_chunks(mrn: str, raw_text: str,):
     """
     Delete old embeddings for this MRN, re-chunk by section, embed, and store.
     Pass raw discharge summary text as `raw_text`.
@@ -166,22 +169,22 @@ def store_chunks(mrn: str, raw_text: str):
     try:
         delete_result = collection.delete_many({"mrn": mrn})
         deleted_count = getattr(delete_result, "deleted_count", "?")
-        print(f"🗑️ Deleted old chunks for {mrn}: {deleted_count} records")
+        print(f" Deleted old chunks for {mrn}: {deleted_count} records")
     except Exception as e:
-        print(f"⚠️ Could not delete old chunks for {mrn}: {e}")
+        print(f" Could not delete old chunks for {mrn}: {e}")
 
     # ── Chunk the text (safe — fallback to whole-text chunk on any error)
     try:
         chunks = split_by_sections(raw_text)
     except Exception as e:
-        print(f"⚠️ split_by_sections failed ({e}) — storing as single chunk")
+        print(f" split_by_sections failed ({e}) — storing as single chunk")
         chunks = [{"section": "FULL_DOCUMENT", "text": raw_text.strip()}]
 
     if not chunks:
-        print("⚠️ No chunks produced — storing as single chunk")
+        print(" No chunks produced — storing as single chunk")
         chunks = [{"section": "FULL_DOCUMENT", "text": raw_text.strip()}]
 
-    print(f"📦 Storing {len(chunks)} section-chunks for MRN: {mrn}")
+    print(f" Storing {len(chunks)} section-chunks for MRN: {mrn}")
 
     # ── Embed and insert each chunk
     for i, chunk in enumerate(chunks):
@@ -195,9 +198,9 @@ def store_chunks(mrn: str, raw_text: str):
                 "$vector":     embedding
             })
         except Exception as e:
-            print(f"⚠️ Failed to insert chunk {i} ({chunk['section']}): {e}")
+            print(f" Failed to insert chunk {i} ({chunk['section']}): {e}")
 
-    print(f"✅ Stored {len(chunks)} sections for {mrn}")
+    print(f" Stored {len(chunks)} sections for {mrn}")
 
 
 # ─────────────────────────────────────────
@@ -280,7 +283,7 @@ def vector_search(question: str, mrn: str) -> dict:
     target_section = detect_target_section(question)
 
     if target_section:
-        print(f"🎯 Direct section lookup: {target_section}")
+        print(f"Direct section lookup: {target_section}")
         direct_results = list(collection.find(
             filter={"mrn": mrn, "section": target_section},
             limit=2,
@@ -309,7 +312,7 @@ def vector_search(question: str, mrn: str) -> dict:
                 }
 
     # ── Step 2: Fallback to vector similarity search ───────────────────────
-    print(f"🔍 Falling back to vector search for: {question}")
+    print(f" Falling back to vector search for: {question}")
     query_vector = generate_embedding(question)
 
     results = list(collection.find(
@@ -379,21 +382,21 @@ def time_based_summary(mrn: str, time_range: str = "Last 6 Months") -> dict:
 
     results.sort(key=lambda x: x.get("chunk_index", 0))
 
-    priority_sections = {
-        "DIAGNOSIS", "DISCHARGE MEDICATIONS",
-        "STATUS AT DISCHARGE", "FOLLOW-UP", "ADVICE ON DISCHARGE"
-    }
+    
 
     summary_parts = []
+    seen_sections = set()
     for doc in results:
         section = doc.get("section", "").upper()
         text    = doc.get("text", "").strip()
-        if section in priority_sections and text:
-            summary_parts.append(f"**{section}**\n{text[:400]}")
+        if not text or section in seen_sections:
+            continue
+        seen_sections.add(section)
+        summary_parts.append(f"[{section}]\n{text[:600]}")
 
     # Fallback if no priority sections found
-    if not summary_parts:
-        summary_parts = [doc["text"][:300] for doc in results]
+        if not summary_parts:
+            summary_parts = [doc["text"][:300] for doc in results]
 
     summary = "\n\n---\n\n".join(summary_parts)
 
@@ -440,6 +443,6 @@ def medication_safety_check(mrn: str) -> dict:
 
     return {
         "medications_raw":     medications,
-        "interactions_raw":    "⚠️ Interaction check pending — will be performed by Nova Lite in API layer.",
+        "interactions_raw":    " Interaction check pending — will be performed by Nova Lite in API layer.",
         "context_chunks_used": len(med_chunks)
     }
