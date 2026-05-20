@@ -599,7 +599,7 @@ def run_summary_loader(mrn: str, time_range: str):
 
     def draw(s):
         rows = "".join(render_step(icon, title, sub, s[i]) for i, (icon, title, sub) in enumerate(steps))
-        placeholder.markdown(loader_card("📅  Generating clinical summary", rows), unsafe_allow_html=True)
+        placeholder.markdown(loader_card("Generating clinical summary", rows), unsafe_allow_html=True)
 
     draw(states)
     states[0] = "active"; draw(states); time.sleep(0.4)
@@ -666,7 +666,7 @@ def run_upload_loader(mrn: str, file_bytes, filename: str):
 
     def draw(s):
         rows = "".join(render_step(icon, title, sub, s[i]) for i, (icon, title, sub) in enumerate(steps))
-        placeholder.markdown(loader_card("📤  Uploading & indexing clinical record", rows), unsafe_allow_html=True)
+        placeholder.markdown(loader_card("  Uploading & indexing clinical record", rows), unsafe_allow_html=True)
 
     draw(states)
     for i in range(2):
@@ -729,7 +729,7 @@ def medication_api(mrn):
 
 def upload_pdf_api(mrn, file_bytes, filename):
     try:
-        r = requests.post(f"{API}/api/upload_pdf?mrn={mrn}",
+        r = requests.post(f"{API}/api/upload?mrn={mrn}",
                           files={"file": (filename, file_bytes, "application/pdf")}, timeout=120)
         return (r.json(), None) if r.ok else (None, r.json().get("detail","Upload failed."))
     except Exception as e:
@@ -804,8 +804,8 @@ st.markdown(f"""
 <div class="page-header">
     <div>
         <div class="page-eyebrow">⚕️ Patient History Summarization System</div>
-        <div class="page-title">🏥 Clinical Intelligence</div>
-        <div class="page-subtitle">🤖 AI-powered medical record analysis</div>
+        <div class="page-title">Clinical Intelligence</div>
+        <div class="page-subtitle">AI-powered medical record analysis</div>
     </div>
    
 </div>
@@ -845,11 +845,11 @@ if tab == "⚕   Patient Query":
         p = st.session_state.current_patient
         c1, c2, c3, c4, c5 = st.columns(5)
         data = [
-            ("👤 Name",          p.get("name","–"),                                               False),
-            ("🪪 MRN",           p.get("mrn","–"),                                                True),
-            ("🎂 Date of Birth", str(p.get("birth_date","–")) if p.get("birth_date") else "–",   False),
-            ("⚧ Gender",        p.get("gender","–"),                                             False),
-            ("📆 Last Encounter",p.get("last_encounter","–"),                                     False),
+            (" Name",          p.get("name","–"),                                               False),
+            (" MRN",           p.get("mrn","–"),                                                True),
+            (" Date of Birth", str(p.get("birth_date","–")) if p.get("birth_date") else "–",   False),
+            (" Gender",        p.get("gender","–"),                                             False),
+            (" Last Encounter",p.get("last_encounter","–"),                                     False),
         ]
         for col, (lbl, val, mono) in zip([c1,c2,c3,c4,c5], data):
             v = f'<div class="cell-mono">{val}</div>' if mono else f'<div class="cell-val">{val}</div>'
@@ -899,8 +899,8 @@ if tab == "⚕   Patient Query":
         st.markdown(f"""
         <div class="feedback-bar">
             <span class="q-pill"><span class="q-dot"></span>⚙️ {qtype}</span>
-            <span class="badge b-muted">🔀 {strategy}</span>
-            <span class="badge b-green">✅ Resolved</span>
+            <span class="badge b-muted"> {strategy}</span>
+            <span class="badge b-green"> Resolved</span>
         </div>
         """, unsafe_allow_html=True)
 
@@ -1055,7 +1055,7 @@ elif tab == "💊   Medication Safety":
         interactions_raw = r.get("interactions_raw","")
         danger_keywords = ["high risk", "risk", "concern", "caution", "interaction", "contraindicated"] 
         has_interaction = any(k in interactions_raw.lower() for k in danger_keywords)
-        int_badge = f'<span class="badge b-amber">⚠️ Review Required</span>' if has_interaction else f'<span class="badge b-green">✅ Clear</span>'
+        int_badge = f'<span class="badge b-amber">⚠️ Review Required</span>' if has_interaction else f'<span class="badge b-green"> Clear</span>'
 
         c_med, c_int = st.columns(2)
         with c_med:
@@ -1074,7 +1074,7 @@ elif tab == "💊   Medication Safety":
             <div class="g-card">
                 <div class="g-card-hdr">
                     <span class="g-accent-bar"></span>
-                    <span class="g-card-hdr-text">🔬 Interaction Analysis</span>
+                    <span class="g-card-hdr-text"> Interaction Analysis</span>
                     <span style="margin-left:auto;">{int_badge}</span>
                 </div>
                 <div class="med-text">{interactions_raw or "–"}</div>
@@ -1100,7 +1100,7 @@ elif tab == "📤   Upload Records":
         value=(st.session_state.current_patient or {}).get("mrn",""),
         placeholder="e.g. 010 or MRN-010", key="u_mrn")
     st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
-    uploaded_file = st.file_uploader("📂 Drop a PDF discharge summary or clinical note here",
+    uploaded_file = st.file_uploader(" Drop a PDF discharge summary or clinical note here",
                                      type=["pdf"], label_visibility="visible")
 
     if uploaded_file:
@@ -1133,25 +1133,25 @@ elif tab == "📤   Upload Records":
         <div class="g-card" style="border-color:rgba(52,211,153,0.3);">
             <div class="g-card-hdr" style="border-color:rgba(52,211,153,0.15);">
                 <span style="width:3px;height:16px;background:{T['green']};border-radius:3px;flex-shrink:0;display:inline-block;"></span>
-                <span class="g-card-hdr-text" style="color:{T['green']};">✅ Upload Successful</span>
-                <span style="margin-left:auto;" class="badge b-green">🗂️ Indexed</span>
+                <span class="g-card-hdr-text" style="color:{T['green']};">Upload Successful</span>
+                <span style="margin-left:auto;" class="badge b-green">Indexed</span>
             </div>
             <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px;">
                 <div class="info-cell">
-                    <div class="cell-lbl">📄 Filename</div>
+                    <div class="cell-lbl">Filename</div>
                     <div style="font-family:'JetBrains Mono',monospace;font-size:11.5px;color:{T['text_primary']};font-weight:500;">{r.get("filename","–")}</div>
                 </div>
                 <div class="info-cell">
-                    <div class="cell-lbl">🪪 MRN</div>
+                    <div class="cell-lbl">MRN</div>
                     <div class="cell-mono">{r.get("mrn","–")}</div>
                 </div>
                 <div class="info-cell">
-                    <div class="cell-lbl">✂️ Chunks Indexed</div>
+                    <div class="cell-lbl">Chunks Indexed</div>
                     <div class="cell-val">{r.get("total_chunks","✓")}</div>
                 </div>
             </div>
             <div class="upload-ok">
-                ✅ Record successfully chunked and stored in AstraDB. Patient is now queryable.
+                Record successfully chunked and stored in AstraDB. Patient is now queryable.
             </div>
         </div>
         """, unsafe_allow_html=True)
